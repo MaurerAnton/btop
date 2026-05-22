@@ -2021,6 +2021,8 @@ namespace Gpu {
 	namespace Panfrost {
 		fs::path devfreq_path;
 		string gpu_name = "Mali GPU";
+		vector<long long> prev_times;
+		long long max_freq = 800'000'000;
 
 		bool init() {
 			if (initialized) return false;
@@ -2035,6 +2037,9 @@ namespace Gpu {
 				Logger::debug("No Panfrost GPU devfreq device found");
 				return false;
 			}
+
+			// Read max frequency for fallback load calculation
+			try { max_freq = stoll(readfile(devfreq_path / "max_freq", "800000000")); } catch (...) {}
 
 			device_count = 1;
 			gpus.resize(gpus.size() + device_count);
@@ -2074,16 +2079,90 @@ namespace Gpu {
 				gpus_slice->temp_max = 95;
 			}
 
-			// Read GPU load: format "busy_time@total_time" e.g. "23@100"
-			string load_str = readfile(devfreq_path / "load", "0@1");
-			load_str = load_str.substr(0, min(load_str.size(), 32ul));
-			auto at_pos = load_str.find('@');
-			if (at_pos != string::npos) {
-				long long busy = 0, total = 0;
-				try { busy = stoll(load_str.substr(0, at_pos)); } catch (...) {}
-				try { total = stoll(load_str.substr(at_pos + 1)); } catch (...) {}
-				long long utilization = (total > 0) ? clamp((long long)round((double)busy * 100.0 / (double)total), 0ll, 100ll) : 0;
-				gpus_slice->gpu_percent.at("gpu-totals").push_back(utilization);
+			// Try load file first (modern kernels: busy_time@total_time)
+			fs::path load_path = devfreq_path / "load";
+			if (fs::exists(load_path)) {
+				string load_str = readfile(load_path, "0@1");
+				load_str = load_str.substr(0, min(load_str.size(), 32ul));
+				auto at_pos = load_str.find('@');
+				if (at_pos != string::npos) {
+					long long busy = 0, total = 0;
+					try { busy = stoll(load_str.substr(0, at_pos)); } catch (...) {}
+					try { total = stoll(load_str.substr(at_pos + 1)); } catch (...) {}
+					long long utilization = (total > 0) ? clamp((long long)round((double)busy * 100.0 / (double)total), 0ll, 100ll) : 0;
+					gpus_slice->gpu_percent.at("gpu-totals").push_back(utilization);
+				}
+			}
+			// Fallback: parse trans_stat — frequency-weighted time residency
+			else if (fs::exists(devfreq_path / "trans_stat")) {
+				string ts = readfile(devfreq_path / "trans_stat", "");
+				if (not ts.empty()) {
+					auto lines = ssplit(ts, '\n');
+					long long total_delta = 0, weighted_delta = 0;
+					vector<long long> cur_times;
+					int line_idx = 0;
+
+					// First pass: count frequencies from header line
+					// Header: "     From  :   To"
+					//         "           : freq1 freq2 ... freqN   time(ms)"
+					size_t freq_count = 0;
+					for (auto& line : lines) {
+						line = ltrim(line);
+						if (line.empty()) continue;
+						if (line.starts_with(":") or line.starts_with(" ")) {
+							// This could be the frequency header row
+							auto parts = ssplit(line);
+							// Parts contain frequency values and "time(ms)" — count only numeric ones
+							for (auto& p : parts) {
+								if (p != "time(ms)" and not p.empty() and p.find_first_not_of("0123456789") == string::npos)
+									freq_count++;
+							}
+							if (freq_count > 0) break;
+						}
+					}
+
+					// Second pass: extract time(ms) for each frequency row
+					int data_row = 0;
+					for (auto& line : lines) {
+						line = ltrim(line);
+						if (line.empty()) continue;
+						// Lines starting with frequency number (possibly with * prefix)
+						// Format: "* 200000000:     0     0  ...  11052900"
+						auto colon_pos = line.find(':');
+						if (colon_pos == string::npos) continue;
+						if (colon_pos == 0) continue; // header ": ..." row
+
+						auto parts = ssplit(line);
+						// Last part is time(ms)
+						if (parts.empty()) continue;
+						long long time_ms = 0;
+						try { time_ms = stoll(parts.back()); } catch (...) { continue; }
+
+						cur_times.push_back(time_ms);
+						data_row++;
+						if (data_row >= (int)freq_count) break;
+					}
+
+					// Compute deltas from previous values
+					if (cur_times.size() == prev_times.size() and cur_times.size() > 0) {
+						// Get frequencies from trans_stat (first frequency row = min freq)
+						// We approximate freq_i = min_freq + i * (max_freq - min_freq) / count
+						for (size_t i = 0; i < cur_times.size(); i++) {
+							long long delta = cur_times[i] - prev_times[i];
+							if (delta < 0) delta = 0; // wraparound guard
+							total_delta += delta;
+							// Linear frequency interpolation
+							double freq_factor = (double)(i + 1) / (double)cur_times.size();
+							weighted_delta += (long long)((double)delta * freq_factor);
+						}
+						if (total_delta > 0) {
+							long long utilization = clamp((long long)round((double)weighted_delta * 100.0 / (double)total_delta), 0ll, 100ll);
+							gpus_slice->gpu_percent.at("gpu-totals").push_back(utilization);
+						}
+					}
+
+					prev_times = std::move(cur_times);
+				}
 			}
 
 			// Read GPU frequency (Hz -> MHz)
