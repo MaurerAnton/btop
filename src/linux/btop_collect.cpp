@@ -266,6 +266,7 @@ namespace Gpu {
 		rsmi_status_t (*rsmi_dev_gpu_clk_freq_get_v5)(uint32_t, rsmi_clk_type_t, rsmi_frequencies_t_v5*);
 		rsmi_status_t (*rsmi_dev_gpu_clk_freq_get_v6)(uint32_t, rsmi_clk_type_t, rsmi_frequencies_t_v6*);
 		rsmi_status_t (*rsmi_dev_power_ave_get)(uint32_t, uint32_t, uint64_t*);
+		rsmi_status_t (*rsmi_dev_energy_count_get)(uint32_t, uint64_t*, float*, uint64_t*);
 		rsmi_status_t (*rsmi_dev_memory_total_get)(uint32_t, rsmi_memory_type_t, uint64_t*);
 		rsmi_status_t (*rsmi_dev_memory_usage_get)(uint32_t, rsmi_memory_type_t, uint64_t*);
 		rsmi_status_t (*rsmi_dev_pci_throughput_get)(uint32_t, uint64_t*, uint64_t*, uint64_t*);
@@ -280,6 +281,8 @@ namespace Gpu {
 		bool shutdown();
 		template <bool is_init> bool collect(gpu_info* gpus_slice);
 		uint32_t device_count = 0;
+		vector<uint64_t> prev_energy;
+		vector<uint64_t> prev_energy_ts;
 	}
 
 
@@ -1595,6 +1598,12 @@ namespace Gpu {
 		    LOAD_SYM(rsmi_dev_busy_percent_get);
 		    LOAD_SYM(rsmi_dev_memory_busy_percent_get);
 		    LOAD_SYM(rsmi_dev_power_ave_get);
+			// Optional: try to load energy counter for power fallback
+			rsmi_dev_energy_count_get = (decltype(rsmi_dev_energy_count_get))load_rsmi_sym("rsmi_dev_energy_count_get");
+			if (rsmi_dev_energy_count_get == nullptr) {
+				Logger::debug("ROCm SMI: rsmi_dev_energy_count_get not available, energy-based power fallback disabled");
+				(void)dlerror();
+			}
 		    LOAD_SYM(rsmi_dev_memory_total_get);
 		    LOAD_SYM(rsmi_dev_memory_usage_get);
 		    LOAD_SYM(rsmi_dev_pci_throughput_get);
@@ -1656,6 +1665,8 @@ namespace Gpu {
 			if (device_count > 0) {
 				gpus.resize(gpus.size() + device_count);
 				gpu_names.resize(gpus.size() + device_count);
+				prev_energy.resize(device_count, 0);
+				prev_energy_ts.resize(device_count, 0);
 
 				initialized = true;
 
@@ -1826,15 +1837,33 @@ namespace Gpu {
 				if (gpus_slice[i].supported_functions.pwr_usage) {
     				uint64_t power;
     				result = rsmi_dev_power_ave_get(i, 0, &power);
-    				if (result != RSMI_STATUS_SUCCESS) {
-						Logger::warning("ROCm SMI: Failed to get GPU power usage");
-						if constexpr(is_init) gpus_slice[i].supported_functions.pwr_usage = false;
-    				} else {
-							gpus_slice[i].pwr_usage = (long long)power / 1000;
-							if (gpus_slice[i].pwr_usage > gpus_slice[i].pwr_max_usage)
-								gpus_slice[i].pwr_max_usage = gpus_slice[i].pwr_usage;
-							gpus_slice[i].gpu_percent.at("gpu-pwr-totals").push_back(clamp((long long)round((double)gpus_slice[i].pwr_usage * 100.0 / (double)gpus_slice[i].pwr_max_usage), 0ll, 100ll));
+    				if (result == RSMI_STATUS_SUCCESS and power > 0) {
+						gpus_slice[i].pwr_usage = (long long)power / 1000;
+					}
+					// Fallback: use energy counter delta (more reliable on some GPUs)
+					else if (rsmi_dev_energy_count_get != nullptr and i < prev_energy.size()) {
+						uint64_t energy, timestamp;
+						float resolution;
+						result = rsmi_dev_energy_count_get(i, &energy, &resolution, &timestamp);
+						if (result == RSMI_STATUS_SUCCESS and prev_energy[i] > 0 and timestamp > prev_energy_ts[i]) {
+							uint64_t delta_energy = energy - prev_energy[i];
+							uint64_t delta_time = timestamp - prev_energy_ts[i];
+							if (delta_time > 0)
+								gpus_slice[i].pwr_usage = (long long)(delta_energy / delta_time);
 						}
+						prev_energy[i] = energy;
+						prev_energy_ts[i] = timestamp;
+					}
+					else {
+						Logger::warning("ROCm SMI: Failed to get GPU power usage (device {})", i);
+						if constexpr(is_init) gpus_slice[i].supported_functions.pwr_usage = false;
+					}
+
+					if (gpus_slice[i].supported_functions.pwr_usage) {
+						if (gpus_slice[i].pwr_usage > gpus_slice[i].pwr_max_usage)
+							gpus_slice[i].pwr_max_usage = gpus_slice[i].pwr_usage;
+						gpus_slice[i].gpu_percent.at("gpu-pwr-totals").push_back(clamp((long long)round((double)gpus_slice[i].pwr_usage * 100.0 / (double)gpus_slice[i].pwr_max_usage), 0ll, 100ll));
+					}
 
 					if constexpr(is_init) gpus_slice[i].supported_functions.pwr_state = false;
 				}
