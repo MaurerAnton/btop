@@ -6,6 +6,8 @@ on:
   workflow_dispatch:
   push:
     branches: main
+    tags:
+      - 'v*'
     paths:
       - 'src/**'
       - '!src/osx/**'
@@ -127,3 +129,19 @@ jobs:
         with:
           name: ${{ env.PKG_FILE }}
           path: ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
+
+      - name: Create GitHub Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@c062c08b532815e2082a85e87e3ef44c3cf98cde # v2.2.1
+        with:
+          files: ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
+          body: |
+            ## btop-panfrost — PineTab2 / Mali GPU мониторинг
+
+            Сборка btop с поддержкой Panfrost (Mali-G52/Bifrost) — GPU utilization, частота, температура.
+
+            ### Установка на PineTab2 (Arch ARM)
+            ```
+            pacman -U ${{ env.PKG_FILE }}.pkg.tar.xz
+            ```
+          generate_release_notes: true
