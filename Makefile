@@ -194,6 +194,7 @@ ifeq ($(GPU_SUPPORT)$(INTEL_GPU_SUPPORT),truetrue)
 	OBJECTS += $(IGT_OBJECTS)
 	SHOW_CC_INFO = false
 	CC_VERSION := $(shell $(CC) -dumpfullversion -dumpversion || echo 0)
+	override ADDFLAGS += -DINTEL_GPU_SUPPORT
 else
 	SHOW_CC_INFO = true
 endif

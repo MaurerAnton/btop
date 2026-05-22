@@ -1895,6 +1895,7 @@ namespace Gpu {
 		}
 	}
 
+#ifdef INTEL_GPU_SUPPORT
 	namespace Intel {
 		bool init() {
 			if (initialized) return false;
@@ -2009,6 +2010,13 @@ namespace Gpu {
 			return true;
 		}
 	}
+#else
+	namespace Intel {
+		bool init() { return false; }
+		bool shutdown() { return false; }
+		template <bool is_init> bool collect(gpu_info*) { (void)is_init; return false; }
+	}
+#endif
 
 	namespace Panfrost {
 		fs::path devfreq_path;
