@@ -294,6 +294,15 @@ namespace Gpu {
 		template <bool is_init> bool collect(gpu_info* gpus_slice);
 		uint32_t device_count = 0;
 	}
+
+	//? Panfrost/Mali data collection (via devfreq sysfs)
+	namespace Panfrost {
+		bool initialized = false;
+		unsigned int device_count = 0;
+		bool init();
+		bool shutdown();
+		template <bool is_init> bool collect(gpu_info* gpus_slice);
+	}
 }
 
 #endif // GPU_SUPPORT
@@ -379,6 +388,10 @@ namespace Shared {
 
 		if (shown_gpus.contains("intel")) {
 			Gpu::Intel::init();
+		}
+
+		if (shown_gpus.contains("panfrost")) {
+			Gpu::Panfrost::init();
 		}
 
 		if (not Gpu::gpu_names.empty()) {
@@ -1997,6 +2010,100 @@ namespace Gpu {
 		}
 	}
 
+	namespace Panfrost {
+		fs::path devfreq_path;
+		string gpu_name = "Mali GPU";
+
+		bool init() {
+			if (initialized) return false;
+
+			for (const auto& d : fs::directory_iterator("/sys/class/devfreq")) {
+				if (d.path().filename().string().ends_with(".gpu")) {
+					devfreq_path = d.path();
+					break;
+				}
+			}
+			if (devfreq_path.empty()) {
+				Logger::debug("No Panfrost GPU devfreq device found");
+				return false;
+			}
+
+			device_count = 1;
+			gpus.resize(gpus.size() + device_count);
+			gpu_names.resize(gpus.size() + device_count);
+			gpu_names[Nvml::device_count + Rsmi::device_count + Intel::device_count] = gpu_name;
+
+			initialized = true;
+			Panfrost::collect<1>(gpus.data() + Nvml::device_count + Rsmi::device_count + Intel::device_count);
+
+			return true;
+		}
+
+		bool shutdown() {
+			if (!initialized) return false;
+			initialized = false;
+			return true;
+		}
+
+		template <bool is_init> bool collect(gpu_info* gpus_slice) {
+			if (!initialized) return false;
+
+			if constexpr(is_init) {
+				gpus_slice->supported_functions = {
+					.gpu_utilization = true,
+					.mem_utilization = false,
+					.gpu_clock = true,
+					.mem_clock = false,
+					.pwr_usage = false,
+					.pwr_state = false,
+					.temp_info = true,
+					.mem_total = false,
+					.mem_used = false,
+					.pcie_txrx = false,
+					.encoder_utilization = false,
+					.decoder_utilization = false
+				};
+				gpus_slice->temp_max = 95;
+			}
+
+			// Read GPU load: format "busy_time@total_time" e.g. "23@100"
+			string load_str = readfile(devfreq_path / "load", "0@1");
+			load_str = load_str.substr(0, min(load_str.size(), 32ul));
+			auto at_pos = load_str.find('@');
+			if (at_pos != string::npos) {
+				long long busy = 0, total = 0;
+				try { busy = stoll(load_str.substr(0, at_pos)); } catch (...) {}
+				try { total = stoll(load_str.substr(at_pos + 1)); } catch (...) {}
+				long long utilization = (total > 0) ? clamp((long long)round((double)busy * 100.0 / (double)total), 0ll, 100ll) : 0;
+				gpus_slice->gpu_percent.at("gpu-totals").push_back(utilization);
+			}
+
+			// Read GPU frequency (Hz -> MHz)
+			if (gpus_slice->supported_functions.gpu_clock) {
+				long long freq_hz = 0;
+				try { freq_hz = stoll(readfile(devfreq_path / "cur_freq", "0")); } catch (...) {}
+				gpus_slice->gpu_clock_speed = (unsigned int)(freq_hz / 1'000'000);
+			}
+
+			// Read GPU temperature from thermal zone
+			if (gpus_slice->supported_functions.temp_info and Config::getB("check_temp")) {
+				for (int i = 0; fs::exists("/sys/class/thermal/thermal_zone" + to_string(i)); i++) {
+					string type = readfile("/sys/class/thermal/thermal_zone" + to_string(i) + "/type", "");
+					type = str_to_lower(type);
+					if (type.contains("gpu") or type.contains("mali")) {
+						long long temp_milli = 0;
+						try { temp_milli = stoll(readfile("/sys/class/thermal/thermal_zone" + to_string(i) + "/temp", "0")); } catch (...) {}
+						gpus_slice->temp.push_back(temp_milli / 1000);
+						while (cmp_greater(gpus_slice->temp.size(), 18)) gpus_slice->temp.pop_front();
+						break;
+					}
+				}
+			}
+
+			return true;
+		}
+	}
+
 	//? Collect data from GPU-specific libraries
 	auto collect(bool no_update) -> vector<gpu_info>& {
 		if (Runner::stopping or (no_update and not gpus.empty())) return gpus;
@@ -2007,6 +2114,7 @@ namespace Gpu {
 		Nvml::collect<0>(gpus.data()); // raw pointer to vector data, size == Nvml::device_count
 		Rsmi::collect<0>(gpus.data() + Nvml::device_count); // size = Rsmi::device_count
 		Intel::collect<0>(gpus.data() + Nvml::device_count + Rsmi::device_count); // size = Intel::device_count
+		Panfrost::collect<0>(gpus.data() + Nvml::device_count + Rsmi::device_count + Intel::device_count); // size = Panfrost::device_count
 
 		//* Calculate average usage
 		long long avg = 0;
