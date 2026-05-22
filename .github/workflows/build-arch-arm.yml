@@ -144,7 +144,7 @@ jobs:
 
       - name: Create GitHub Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@da429b91ffaa94bcaa8f44a9e4abca1304250332 # v2.2.2
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
