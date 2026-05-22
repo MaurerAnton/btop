@@ -124,17 +124,31 @@ jobs:
           echo "PKG_FILE=${PKG_FILE}" >> "${GITHUB_ENV}"
           echo "BUILDDIR=${BUILDDIR}" >> "${GITHUB_ENV}"
 
+      - name: Sign package with GPG
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "${GPG_PRIVATE_KEY}" | base64 -d | gpg --batch --import
+          gpg --batch --yes --detach-sign \
+            --pinentry-mode loopback \
+            --passphrase '' \
+            "${BUILDDIR}/${PKG_FILE}.pkg.tar.xz"
+
       - name: Upload Arch package artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.PKG_FILE }}
-          path: ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
+          path: |
+            ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
+            ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz.sig
 
       - name: Create GitHub Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@c062c08b532815e2082a85e87e3ef44c3cf98cde # v2.2.1
         with:
-          files: ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
+          files: |
+            ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz
+            ${{ env.BUILDDIR }}/${{ env.PKG_FILE }}.pkg.tar.xz.sig
           body: |
             ## btop-panfrost — PineTab2 / Mali GPU мониторинг
 
