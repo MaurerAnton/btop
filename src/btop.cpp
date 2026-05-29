@@ -44,6 +44,9 @@ tab-size = 4
 #include <chrono>
 #include <utility>
 #include <semaphore>
+#ifdef __linux__
+#include <poll.h>
+#endif
 
 #ifdef __APPLE__
 	#include <CoreFoundation/CoreFoundation.h>
@@ -725,10 +728,19 @@ namespace Runner {
 
 			//? If overlay isn't empty, print output without color and then print overlay on top
 			const bool term_sync = Config::getB("terminal_sync");
-			cout << (term_sync ? Term::sync_start : "") << (conf.overlay.empty()
+			const string final_output = (term_sync ? Term::sync_start : "") + (conf.overlay.empty()
 					? output
 					: (output.empty() ? "" : Fx::ub + Theme::c("inactive_fg") + Fx::uncolor(output)) + conf.overlay)
-				<< (term_sync ? Term::sync_end : "") << flush;
+				+ (term_sync ? Term::sync_end : "");
+		#ifdef __linux__
+			// Non-blocking write with 50ms timeout; skip frame if stdout is congested
+			struct pollfd pfd = { .fd = STDOUT_FILENO, .events = POLLOUT, .revents = 0 };
+			if (poll(&pfd, 1, 50) > 0 and (pfd.revents & POLLOUT))
+				cout << final_output << flush;
+			// else frame dropped — stdout not ready
+		#else
+			cout << final_output << flush;
+		#endif
 		}
 		//* ----------------------------------------------- THREAD LOOP -----------------------------------------------
 		return {};

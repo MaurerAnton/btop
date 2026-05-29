@@ -343,8 +343,7 @@ namespace Shared {
 
 		//? Detect physical cores and SMT status
 		{
-			long total_procs = sysconf(_SC_NPROCESSORS_CONF);
-			// Read physical core count from lscpu-like /proc/cpuinfo
+			// Read physical core count from /proc/cpuinfo
 			physical_cores = coreCount;  // default fallback
 			ifstream cpuinfo_read(procPath / "cpuinfo");
 			if (cpuinfo_read.good()) {
@@ -361,9 +360,9 @@ namespace Shared {
 							physical_cores = std::stoi(line.substr(colon + 2));
 					}
 				}
-				// If physical ID mapping is better, use it
-				if (not phys_ids.empty() and (long)phys_ids.size() > 0)
-					physical_cores = (long)phys_ids.size();
+				// "cpu cores" reports per-socket. Multiply by socket count for multi-socket.
+				if (not phys_ids.empty() and physical_cores > 0 and physical_cores < coreCount)
+					physical_cores = physical_cores * (long)phys_ids.size();
 			}
 			// Check /sys for SMT status
 			string smt_active = readfile("/sys/devices/system/cpu/smt/active", "");
