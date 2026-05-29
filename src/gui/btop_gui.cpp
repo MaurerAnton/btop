@@ -184,9 +184,11 @@ void CpuPanel::BuildUI() {
     smt_label->SetForegroundColour(wxColour(160, 160, 160));
     info_row->Add(smt_label, 0, wxALL | wxALIGN_CENTER_VERTICAL, 4);
 
+    info_row->AddStretchSpacer();
+
     freq_label = new wxStaticText(this, wxID_ANY, "", wxDefaultPosition, wxSize(120, 20));
     freq_label->SetForegroundColour(wxColour(120, 200, 120));
-    info_row->Add(freq_label, 0, wxALL | wxALIGN_RIGHT, 4);
+    info_row->Add(freq_label, 0, wxALL | wxALIGN_CENTER_VERTICAL, 4);
 
     main_sizer->Add(info_row, 0, wxEXPAND);
 
