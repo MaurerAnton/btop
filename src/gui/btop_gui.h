@@ -68,7 +68,7 @@ private:
 
 // ─── CPU Panel ────────────────────────────────────────────────
 
-class CpuPanel : public wxScrolledWindow {
+class CpuPanel : public wxPanel {
 public:
     CpuPanel(wxWindow* parent);
 
@@ -93,7 +93,7 @@ private:
 
 // ─── Memory Panel ─────────────────────────────────────────────
 
-class MemPanel : public wxScrolledWindow {
+class MemPanel : public wxPanel {
 public:
     MemPanel(wxWindow* parent);
 
@@ -114,7 +114,7 @@ private:
 
 // ─── Network Panel ────────────────────────────────────────────
 
-class NetPanel : public wxScrolledWindow {
+class NetPanel : public wxPanel {
 public:
     NetPanel(wxWindow* parent);
 
@@ -150,7 +150,6 @@ private:
     void BuildUI();
     void UpdateList();
     void OnColClick(wxListEvent& evt);
-    void OnItemActivated(wxListEvent& evt);
 
     wxListCtrl* proc_list = nullptr;
     wxStaticText* count_label = nullptr;
@@ -168,7 +167,6 @@ public:
     MainFrame();
 
 private:
-    void OnTimer(wxTimerEvent& evt);
     void OnClose(wxCloseEvent& evt);
 
     wxAuiNotebook* notebook = nullptr;
@@ -176,7 +174,6 @@ private:
     MemPanel* mem_panel = nullptr;
     NetPanel* net_panel = nullptr;
     ProcPanel* proc_panel = nullptr;
-    wxTimer* refresh_timer = nullptr;
 
     wxDECLARE_EVENT_TABLE();
 };
