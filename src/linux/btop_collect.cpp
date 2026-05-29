@@ -28,8 +28,8 @@ tab-size = 4
 #include <optional>
 #include <ranges>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
+#include <unordered_map>
 #include <utility>
 
 #include <arpa/inet.h> // for inet_ntop()
@@ -318,6 +318,8 @@ namespace Shared {
 
 	fs::path procPath, passwd_path;
 	long pageSize, clkTck, coreCount;
+	long physical_cores{};
+	bool smt_enabled{};
 
 	void init() {
 
@@ -337,6 +339,35 @@ namespace Shared {
 				coreCount = 1;
 				Logger::warning("Could not determine number of cores, defaulting to 1.");
 			}
+		}
+
+		//? Detect physical cores and SMT status
+		{
+			long total_procs = sysconf(_SC_NPROCESSORS_CONF);
+			// Read physical core count from lscpu-like /proc/cpuinfo
+			physical_cores = coreCount;  // default fallback
+			ifstream cpuinfo_read(procPath / "cpuinfo");
+			if (cpuinfo_read.good()) {
+				std::unordered_set<int> phys_ids;
+				for (string line; getline(cpuinfo_read, line);) {
+					if (line.starts_with("physical id")) {
+						auto colon = line.find(':');
+						if (colon != string::npos)
+							phys_ids.insert(std::stoi(line.substr(colon + 2)));
+					}
+					else if (line.starts_with("cpu cores")) {
+						auto colon = line.find(':');
+						if (colon != string::npos)
+							physical_cores = std::stoi(line.substr(colon + 2));
+					}
+				}
+				// If physical ID mapping is better, use it
+				if (not phys_ids.empty() and (long)phys_ids.size() > 0)
+					physical_cores = (long)phys_ids.size();
+			}
+			// Check /sys for SMT status
+			string smt_active = readfile("/sys/devices/system/cpu/smt/active", "");
+			smt_enabled = (smt_active == "1" or coreCount > physical_cores);
 		}
 
 		pageSize = sysconf(_SC_PAGE_SIZE);
@@ -2994,6 +3025,18 @@ namespace Net {
 					if (saved_stat.offset > val + saved_stat.rollover) saved_stat.offset = 0;
 					saved_stat.total = (val + saved_stat.rollover) - saved_stat.offset;
 					saved_stat.last = val;
+
+					//? Maintain rolling 5-minute average speed
+					saved_stat.speed_history.push_back(saved_stat.speed);
+					saved_stat.speed_sum += saved_stat.speed;
+					// Keep ~5 minutes of history (300 samples at 1s tick rate)
+					constexpr size_t max_speed_history = 300;
+					while (saved_stat.speed_history.size() > max_speed_history) {
+						saved_stat.speed_sum -= saved_stat.speed_history.front();
+						saved_stat.speed_history.pop_front();
+					}
+					saved_stat.avg_speed = saved_stat.speed_history.empty() ? 0
+						: saved_stat.speed_sum / saved_stat.speed_history.size();
 
 					//? Add values to graph
 					bandwidth.push_back(saved_stat.speed);

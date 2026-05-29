@@ -1545,6 +1545,7 @@ namespace Net {
 			const string speed_bits = (b_width >= 20 ? floating_humanizer(safeVal(net.stat, dir).speed, false, 0, true, true) : "");
 			const string top = floating_humanizer(safeVal(net.stat, dir).top, false, 0, true, true);
 			const string total = floating_humanizer(safeVal(net.stat, dir).total);
+			const string avg_5m = floating_humanizer(safeVal(net.stat, dir).avg_speed, false, 0, true, true);
 			const string symbol = (dir == "upload" ? "▲" : "▼");
 			if ((swap_upload_download and dir == "upload") or (not swap_upload_download and dir == "download")) {
 				// Top graph
@@ -1553,6 +1554,8 @@ namespace Net {
 					out += Mv::to(b_y+2, b_x+1) + symbol + ' ' + "Top: " + rjust('(' + top, (b_width >= 20 ? 17 : 9)) + ')';
 				if (b_height >= 6)
 					out += Mv::to(b_y+2 + (b_height >= 8), b_x+1) + symbol + ' ' + "Total: " + rjust(total, (b_width >= 20 ? 16 : 8));
+				if (b_height >= 9)
+					out += Mv::to(b_y+3 + (b_height >= 8), b_x+1) + symbol + ' ' + "5m avg: " + rjust('(' + avg_5m + ')', (b_width >= 20 ? 14 : 6));
 			} else {
 				// Bottom graph
 				out += Mv::to(b_y + b_height - (b_height / 2), b_x + 1) + Fx::ub + Theme::c("main_fg") + symbol + ' ' + ljust(speed, 10) + (b_width >= 20 ? rjust('(' + speed_bits + ')', 13) : "");
@@ -1560,6 +1563,8 @@ namespace Net {
 					out += Mv::to(b_y + b_height - (b_height / 2) + 1, b_x + 1) + symbol + ' ' + "Top: " + rjust('(' + top, (b_width >= 20 ? 17 : 9)) + ')';
 				if (b_height >= 6)
 					out += Mv::to(b_y + b_height - (b_height / 2) + 1 + (b_height >= 8), b_x + 1) + symbol + ' ' + "Total: " + rjust(total, (b_width >= 20 ? 16 : 8));
+				if (b_height >= 9)
+					out += Mv::to(b_y + b_height - (b_height / 2) + 2 + (b_height >= 8), b_x + 1) + symbol + ' ' + "5m avg: " + rjust('(' + avg_5m + ')', (b_width >= 20 ? 14 : 6));
 			}
 		}
 
@@ -2338,8 +2343,16 @@ namespace Draw {
 		#else
 			static const bool freq_range = false;
 		#endif
+			// Build CPU title with core/thread info
+			string cpu_display = custom.empty() ? Cpu::cpuName : custom;
+		#ifdef __linux__
+			if (Shared::smt_enabled and Shared::physical_cores > 0)
+				cpu_display += " [" + to_string(Shared::physical_cores) + "C/" + to_string(Shared::coreCount) + "T]";
+			else if (Shared::physical_cores > 0)
+				cpu_display += " [" + to_string(Shared::physical_cores) + "C]";
+		#endif
 			const string cpu_title = uresize(
-					(custom.empty() ? Cpu::cpuName : custom),
+					cpu_display,
 					b_width - (Config::getB("show_cpu_freq") and hasCpuHz ? (freq_range ? 24 : 14) : 5)
 			);
 			box += createBox(b_x, b_y, b_width, b_height, "", false, cpu_title);

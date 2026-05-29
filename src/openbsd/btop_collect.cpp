@@ -887,6 +887,17 @@ namespace Net {
 					saved_stat.total = (val + saved_stat.rollover) - saved_stat.offset;
 					saved_stat.last = val;
 
+					//? Maintain rolling 5-minute average speed
+					saved_stat.speed_history.push_back(saved_stat.speed);
+					saved_stat.speed_sum += saved_stat.speed;
+					constexpr size_t max_speed_history = 300;
+					while (saved_stat.speed_history.size() > max_speed_history) {
+						saved_stat.speed_sum -= saved_stat.speed_history.front();
+						saved_stat.speed_history.pop_front();
+					}
+					saved_stat.avg_speed = saved_stat.speed_history.empty() ? 0
+						: saved_stat.speed_sum / saved_stat.speed_history.size();
+
 					//? Add values to graph
 					bandwidth.push_back(saved_stat.speed);
 					while (cmp_greater(bandwidth.size(), width * 2)) bandwidth.pop_front();

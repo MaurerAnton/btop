@@ -93,6 +93,10 @@ namespace Shared {
 	void init();
 
 	extern long coreCount, page_size, clk_tck;
+#ifdef __linux__
+	extern long physical_cores;
+	extern bool smt_enabled;
+#endif
 
 #if defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
 	struct KvmDeleter {
@@ -321,6 +325,9 @@ namespace Net {
 		uint64_t last{};
 		uint64_t offset{};
 		uint64_t rollover{};
+		deque<uint64_t> speed_history{};
+		uint64_t speed_sum{};
+		uint64_t avg_speed{};
 	};
 
 	struct net_info {

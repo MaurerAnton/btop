@@ -41,9 +41,16 @@ namespace Cpu {
 		if ((name.contains("Xeon") or v_contains(name_vec, "Duo"s)) and v_contains(name_vec, "CPU"s)) {
 			auto cpu_pos = v_index(name_vec, "CPU"s);
 			if (cpu_pos < name_vec.size() - 1 and not name_vec.at(cpu_pos + 1).ends_with(')'))
-				name = name_vec.at(cpu_pos + 1);
+				name = "Xeon " + name_vec.at(cpu_pos + 1);
 			else
 				name.clear();
+			// Append version (v2, v3, v4, etc.) if present
+			auto v_pos = v_index(name_vec, "CPU"s) + 2;
+			while (v_pos < name_vec.size() and name_vec.at(v_pos) != "@") {
+				if (name_vec.at(v_pos).starts_with("v") and name_vec.at(v_pos).size() <= 3)
+					name += " " + name_vec.at(v_pos);
+				v_pos++;
+			}
 		} else if (v_contains(name_vec, "Ryzen"s)) {
 			auto ryz_pos = v_index(name_vec, "Ryzen"s);
 			name = "Ryzen";
