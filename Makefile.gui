@@ -1,0 +1,61 @@
+# Makefile for btop-gui (wxWidgets frontend)
+# Reuses btop backend objects, links with wxWidgets
+
+BTOP_SRC = $(CURDIR)/src
+GUI_SRC = $(BTOP_SRC)/gui
+OBJ_DIR = $(CURDIR)/obj
+
+# Minimal backend objects needed for data collection
+BACKEND_OBJS = \
+	$(OBJ_DIR)/btop_shared.o \
+	$(OBJ_DIR)/btop_config.o \
+	$(OBJ_DIR)/btop_tools.o \
+	$(OBJ_DIR)/btop_theme.o \
+	$(OBJ_DIR)/btop_log.o
+
+# Platform-specific collector
+PLATFORM := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+ifeq ($(PLATFORM),linux)
+	BACKEND_OBJS += $(OBJ_DIR)/linux/btop_collect.o
+else
+	BACKEND_OBJS += $(OBJ_DIR)/$(PLATFORM)/btop_collect.o
+endif
+
+# Compiler flags
+CXX ?= g++
+CXXFLAGS += -std=c++23 -pthread -DFMT_HEADER_ONLY
+CXXFLAGS += -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG
+CXXFLAGS += -D_FILE_OFFSET_BITS=64 -fexceptions -fstack-clash-protection
+CXXFLAGS += -fcf-protection -fstack-protector -DGPU_SUPPORT -O2
+CXXFLAGS += -Wall -Wextra -pedantic
+CXXFLAGS += -isystem $(CURDIR)/include -I$(BTOP_SRC) -I$(OBJ_DIR)
+
+WX_CXXFLAGS := $(shell wx-config --cxxflags 2>/dev/null)
+WX_LIBS := $(shell wx-config --libs aui,core 2>/dev/null)
+
+CXXFLAGS += $(WX_CXXFLAGS)
+
+TARGET = bin/btop-gui
+
+.PHONY: all clean backend-check
+
+all: backend-check $(TARGET)
+	@echo "Build complete: $(TARGET)"
+
+backend-check:
+	@for obj in $(BACKEND_OBJS); do \
+		if [ ! -f "$$obj" ]; then \
+			echo "Missing: $$obj — build btop first: make -j\$$(nproc)"; \
+			exit 1; \
+		fi; \
+	done
+
+$(TARGET): $(GUI_SRC)/btop_gui.o $(BACKEND_OBJS)
+	@mkdir -p bin
+	$(CXX) $(CXXFLAGS) $^ -o $@ $(WX_LIBS) -lpthread -ldl
+
+$(GUI_SRC)/btop_gui.o: $(GUI_SRC)/btop_gui.cpp $(GUI_SRC)/btop_gui.h
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(GUI_SRC)/btop_gui.o $(TARGET)
