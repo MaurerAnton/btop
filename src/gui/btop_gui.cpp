@@ -65,13 +65,13 @@ void Dashboard::RefreshState(){
 void Dashboard::OnPaint(wxPaintEvent&){
     wxSize sz=GetClientSize();
     if(sz.x<100||sz.y<10)return;
-    // Create our own bitmap-backed DC to avoid scrolled window edge issues
-    wxBitmap bmp(sz.x,sz.y);
+    // Add 100px padding to avoid edge corruption in wxMemoryDC
+    int pw=sz.x+100,ph=sz.y+200;
+    wxBitmap bmp(pw,ph);
     wxMemoryDC mdc(bmp);
     mdc.SetBackground(wxBrush(BG));mdc.Clear();
     DoPaint(mdc);
     mdc.SelectObject(wxNullBitmap);
-    // Blit to paint DC
     wxPaintDC pdc(this);
     pdc.DrawBitmap(bmp,0,0);
 }
