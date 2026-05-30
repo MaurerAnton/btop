@@ -62,8 +62,9 @@ void Dashboard::RefreshState(){
 void Dashboard::OnPaint(wxPaintEvent&){wxAutoBufferedPaintDC dc(this);DoPaint(dc);}
 
 void Dashboard::DrawBox(wxDC&dc,int x,int y,int w,int h,const wxColour&fill,const wxColour&border){
+    if(w<=0||h<=0)return;
     dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(fill));dc.DrawRectangle(x,y,w,h);
-    if(border!=fill){dc.SetPen(wxPen(border,2));dc.SetBrush(*wxTRANSPARENT_BRUSH);dc.DrawRectangle(x,y,w,h);}}
+    dc.SetPen(wxPen(border,2));dc.SetBrush(*wxTRANSPARENT_BRUSH);dc.DrawRectangle(x,y,w,h);}
 
 void Dashboard::DrawInnerBox(wxDC&dc,int x,int y,int w,int h,const wxString&title){
     DrawBox(dc,x,y,w,h,BOX_FILL,DIV_C);
@@ -87,8 +88,10 @@ void Dashboard::LineG(wxDC&dc,int x,int y,int w,int h,const deque<long long>&d,l
 
 // ─── Layout ───────────────────────────────────────────────
 void Dashboard::DoPaint(wxDC&dc){
-    wxSize sz=GetClientSize();int W=max(680,sz.x);(void)sz.y;dc.SetBackground(wxBrush(BG));dc.Clear();
-    int pad=2,gap=2,x=2,y=2;
+    wxSize sz=GetClientSize();int W=max(680,sz.x);(void)sz.y;
+    if(W<100)return; // safety
+    dc.SetBackground(wxBrush(BG));dc.Clear();
+    int gap=2,x=2,y=2;
 
     // Row 1: CPU full width
     int cpu_w=W-4,cpu_h=show_cpu?CpuH(cpu_w):0;
