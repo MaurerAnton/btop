@@ -79,11 +79,14 @@ void Dashboard::DrawInnerBox(wxDC&dc,int x,int y,int w,int h,const wxString&titl
 void Dashboard::Txt(wxDC&dc,int x,int y,const wxString&s,const wxColour&c,int sz,bool b){
     dc.SetTextForeground(c);dc.SetFont(wxFont(sz,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,b?wxFONTWEIGHT_BOLD:wxFONTWEIGHT_NORMAL));dc.DrawText(s,x,y);}
 
-void Dashboard::Bar(wxDC&dc,int x,int y,int w,int h,double p,const wxColour&c){p=max(0.0,min(1.0,p));
-    int fw=(int)(w*p);if(fw>0){dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(c));dc.DrawRectangle(x,y,fw,h);}
+void Dashboard::Bar(wxDC&dc,int x,int y,int w,int h,double p,const wxColour&c){
+    if(w<=0||h<=0)return;
+    p=max(0.0,min(1.0,p));int fw=(int)(w*p);
+    if(fw>0){dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(c));dc.DrawRectangle(x,y,fw,h);}
     dc.SetPen(wxPen(DIV_C));dc.SetBrush(*wxTRANSPARENT_BRUSH);dc.DrawRectangle(x,y,w,h);}
 
 void Dashboard::LineG(wxDC&dc,int x,int y,int w,int h,const deque<long long>&d,long long mx,const wxColour&c,bool border){
+    if(w<=4||h<=4)return;
     dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(GRAPH_BG));dc.DrawRectangle(x,y,w,h);
     if(d.size()>=2){long long m=mx?mx:max(1ll,*max_element(d.begin(),d.end()));m=max(m,1ll);int n=d.size();
         dc.SetPen(wxPen(c,1));double xs=(double)w/max(1,n-1),ys=(double)h/(double)m;int lx=-1,ly=-1;
@@ -165,7 +168,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     iy+=4;
     // Per-core list in inner box
     int ncores=max(1,(int)state.cpu_cores.size()),items_per_col=(bh-iy+by)/11;
-    int cols=1;if(bw>45)cols=2;
+    int cols=1;if(bw>90)cols=2; // need 90px+ for 2 columns to fit bars
     for(int col=0;col<cols;col++){int cix=ix+col*(bw/cols),ciy=iy;
         for(int i=col*items_per_col;i<ncores&&i<(col+1)*items_per_col;i++){
             if(ciy>by+bh-10)break;
