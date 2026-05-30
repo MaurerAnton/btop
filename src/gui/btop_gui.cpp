@@ -121,8 +121,10 @@ int Dashboard::ProcH(int){int n=min(30,(int)state.procs.size())+1;return 18+14+n
 
 // ─── CPU Box ──────────────────────────────────────────────
 void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
+    fprintf(stderr,"DrawCPU: x=%d y=%d ow=%d oh=%d\n",x,y,ow,oh);fflush(stderr);
     DrawBox(dc,x,y,ow,oh,BOX_FILL,BOX_BORDER);
-    int pad=3;int title_h=17;
+    int title_h=17;
+    fprintf(stderr,"DrawCPU: box drawn\n");fflush(stderr);
     string nm=state.cpu_name;
 #ifdef __linux__
     if(Shared::physical_cores>0){nm+=" ["+to_string(Shared::physical_cores)+"C";if(Shared::smt_enabled)nm+="/"+to_string(Shared::coreCount)+"T";nm+="]";}
@@ -130,6 +132,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     int bw=ow*38/100;if(bw<28)bw=28;if(bw>65)bw=65; // Inner stats box width
     int bx=x+ow-bw-2,by=y+1,bh=oh-2;
     // Title bar in outer box
+    fprintf(stderr,"DrawCPU: title bar\n");fflush(stderr);
     dc.SetTextForeground(HI_C);Txt(dc,x+4,y+2,"m",HI_C,8,1);Txt(dc,x+12,y+2,"enu",TITLE_C,8);
     Txt(dc,x+44,y+2,"p",HI_C,8,1);Txt(dc,x+52,y+2,"reset",TITLE_C,8);
     // CPU name centered
@@ -137,6 +140,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
         int tw,th;dc.GetTextExtent(wxString::FromUTF8(nm),&tw,&th);dc.DrawText(wxString::FromUTF8(nm),x+(ow-tw)/2,y+2);}
     if(!state.cpu_freq.empty())Txt(dc,x+ow-bw-70,y+2,wxString::FromUTF8(state.cpu_freq),TGREEN,8);
     // Inner stats box on right
+    fprintf(stderr,"DrawCPU: inner box bw=%d bx=%d by=%d bh=%d\n",bw,bx,by,bh);fflush(stderr);
     DrawInnerBox(dc,bx,by,bw,bh,wxString::FromUTF8(nm));
     int iy=by+12,ix=bx+2;
     // CPU meter
@@ -163,8 +167,11 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
             Txt(dc,cix+(bw/cols)-24,ciy,wxString::Format("%.0f%%",cp),MAIN_C,7);ciy+=11;}}
     // CPU graph on the left
     int gx=x+4,gy=y+title_h,gw=ow-bw-8,gh=oh-title_h-34;
+    fprintf(stderr,"DrawCPU: graph gx=%d gy=%d gw=%d gh=%d\n",gx,gy,gw,gh);fflush(stderr);
     if(gh>10){
+        fprintf(stderr,"DrawCPU: lineg start\n");fflush(stderr);
         LineG(dc,gx,gy,gw,gh,state.cpu_total,100,CPU_C,true);
+        fprintf(stderr,"DrawCPU: lineg done\n");fflush(stderr);
         // Big % in graph center
         wxString ps=wxString::Format("%lld%%",pct);dc.SetFont(wxFont(16,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD));
         int tw,th;dc.GetTextExtent(ps,&tw,&th);
