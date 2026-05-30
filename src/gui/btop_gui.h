@@ -27,7 +27,7 @@ private:
         struct DiskEntry{std::string mount;Mem::disk_info info;};std::vector<DiskEntry>disks;
         std::deque<long long>net_dl,net_ul;uint64_t net_dl_speed=0,net_ul_speed=0,net_dl_total=0,net_ul_total=0,net_dl_avg=0,net_ul_avg=0;
         std::string net_iface,net_ip;bool net_connected=false;std::vector<Proc::proc_info>procs;}state;
-    wxTimer*timer;int paint_h=1600;wxDECLARE_EVENT_TABLE();};
+    wxTimer*timer;int paint_h=1600;bool painting=false;wxDECLARE_EVENT_TABLE();};
 class MainFrame:public wxFrame{public:MainFrame();void TakeScreenshot(const wxString&p);Dashboard*dash=nullptr;
 private:void OnClose(wxCloseEvent&);void OnKeyDown(wxKeyEvent&);wxDECLARE_EVENT_TABLE();};
 class BtopApp:public wxApp{public:bool OnInit()override;int OnExit()override;};

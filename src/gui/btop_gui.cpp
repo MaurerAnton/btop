@@ -39,6 +39,7 @@ Dashboard::Dashboard(wxWindow*p):wxScrolledWindow(p,wxID_ANY){state.loadavg[0]=s
     SetBackgroundStyle(wxBG_STYLE_PAINT);SetScrollRate(8,8);SetBackgroundColour(BG);
     timer=new wxTimer(this);
     timer->Bind(wxEVT_TIMER,[this](wxTimerEvent&){
+        if(painting)return; // skip if painting in progress
         Cpu::collect(false);Mem::collect(false);Net::collect(false);Proc::collect(false);
         RefreshState();Refresh(false);});timer->Start(1500);
     try{RefreshState();}catch(...){fprintf(stderr,"btop-gui: RefreshState crashed\n");}}
@@ -63,6 +64,7 @@ void Dashboard::RefreshState(){
 
 // ─── Drawing primitives ────────────────────────────────────
 void Dashboard::OnPaint(wxPaintEvent&){
+    painting=true;
     wxSize sz=GetClientSize();
     if(sz.x<100||sz.y<10)return;
     // Add 100px padding to avoid edge corruption in wxMemoryDC
@@ -74,6 +76,7 @@ void Dashboard::OnPaint(wxPaintEvent&){
     mdc.SelectObject(wxNullBitmap);
     wxPaintDC pdc(this);
     pdc.DrawBitmap(bmp,0,0);
+    painting=false;
 }
 
 void Dashboard::DrawBox(wxDC&dc,int x,int y,int w,int h,const wxColour&fill,const wxColour&border){
