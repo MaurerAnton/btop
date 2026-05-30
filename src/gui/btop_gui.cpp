@@ -163,6 +163,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
         LineG(dc,gx,gy,gw,gh,state.cpu_total,100,CPU_C,true);
         fprintf(stderr,"DrawCPU: lineg done\n");fflush(stderr);
     }
+    fprintf(stderr,"DrawCPU: after graph\n");fflush(stderr);
     // Stats below graph
     long long pct=state.cpu_total.empty()?0:state.cpu_total.back();
     int sy=gy+gh+4;
