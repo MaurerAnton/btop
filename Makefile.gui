@@ -30,6 +30,9 @@ CXXFLAGS += -fcf-protection -fstack-protector -DGPU_SUPPORT -O2
 CXXFLAGS += -Wall -Wextra -pedantic
 CXXFLAGS += -isystem $(CURDIR)/include -I$(BTOP_SRC) -I$(OBJ_DIR)
 
+# Save base flags before adding wx
+BASE_CXXFLAGS := $(CXXFLAGS)
+
 WX_CXXFLAGS := $(shell wx-config --cxxflags 2>/dev/null)
 WX_LIBS := $(shell wx-config --libs aui,core 2>/dev/null)
 
@@ -59,3 +62,12 @@ $(GUI_SRC)/btop_gui.o: $(GUI_SRC)/btop_gui.cpp $(GUI_SRC)/btop_gui.h
 
 clean:
 	rm -f $(GUI_SRC)/btop_gui.o $(TARGET)
+
+# Headless screenshot tool using Cairo (no display needed)
+SCREENSHOT_TARGET = bin/btop-screenshot
+$(SCREENSHOT_TARGET): $(GUI_SRC)/btop_screenshot.cpp $(BACKEND_OBJS)
+	@mkdir -p bin
+	$(CXX) $(BASE_CXXFLAGS) $(shell pkg-config --cflags cairo) $(GUI_SRC)/btop_screenshot.cpp $(BACKEND_OBJS) -o $@ $(shell pkg-config --libs cairo) -lpthread -ldl
+	@echo "Screenshot tool built: $(SCREENSHOT_TARGET)"
+
+screenshot: $(SCREENSHOT_TARGET)
