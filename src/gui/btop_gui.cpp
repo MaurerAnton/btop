@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdio>
 using namespace std;
 
 namespace Runner{atomic<bool>stopping{false},coreNum_reset{false},active{false},redraw{false};bool pause_output=false;}
@@ -36,9 +37,11 @@ static string sf(double s){int d=s/86400,h=((int)s%86400)/3600,m=((int)s%3600)/6
 wxBEGIN_EVENT_TABLE(Dashboard,wxScrolledWindow)EVT_PAINT(Dashboard::OnPaint)wxEND_EVENT_TABLE()
 Dashboard::Dashboard(wxWindow*p):wxScrolledWindow(p,wxID_ANY){state.loadavg[0]=state.loadavg[1]=state.loadavg[2]=0;
     SetBackgroundStyle(wxBG_STYLE_PAINT);SetScrollRate(8,8);SetBackgroundColour(BG);
-    timer=new wxTimer(this);timer->Bind(wxEVT_TIMER,[this](wxTimerEvent&){
+    timer=new wxTimer(this);
+    timer->Bind(wxEVT_TIMER,[this](wxTimerEvent&){
         Cpu::collect(false);Mem::collect(false);Net::collect(false);Proc::collect(false);
-        RefreshState();Refresh(false);});timer->Start(1500);RefreshState();}
+        RefreshState();Refresh(false);});timer->Start(1500);
+    try{RefreshState();}catch(...){fprintf(stderr,"btop-gui: RefreshState crashed\n");}}
 void Dashboard::RefreshState(){
     auto&cpu=Cpu::current_cpu;if(cpu.cpu_percent.contains("total"s))state.cpu_total=cpu.cpu_percent.at("total"s);
     state.cpu_name=Cpu::cpuName;state.cpu_freq=Cpu::cpuHz;state.cpu_cores=cpu.core_percent;
@@ -244,10 +247,27 @@ void MainFrame::OnKeyDown(wxKeyEvent&e){int k=e.GetKeyCode();
     if(k=='1'){dash->show_cpu=!dash->show_cpu;dash->Refresh();}else if(k=='2'){dash->show_mem=!dash->show_mem;dash->Refresh();}
     else if(k=='3'){dash->show_net=!dash->show_net;dash->Refresh();}else if(k=='4'){dash->show_proc=!dash->show_proc;dash->Refresh();}
     else if(k=='S'&&e.ControlDown())TakeScreenshot("/tmp/btop-gui-screenshot.png");e.Skip();}
-bool BtopApp::OnInit(){bool shot=false;for(int i=1;i<argc;i++)if(string(argv[i])=="--screenshot")shot=true;
-    try{Shared::init();}catch(const exception&e){wxMessageBox("Init failed: "+string(e.what()),"Error");return false;}
-    Cpu::collect(false);Mem::collect(false);Net::collect(false);Proc::collect(false);
-    MainFrame*f=new MainFrame();f->Show(true);if(shot){wxTimer*st=new wxTimer(f);
+bool BtopApp::OnInit(){
+    fprintf(stderr,"btop-gui: OnInit start\n");fflush(stderr);
+    bool shot=false;for(int i=1;i<argc;i++)if(string(argv[i])=="--screenshot")shot=true;
+    try{
+        fprintf(stderr,"btop-gui: Shared::init...\n");fflush(stderr);
+        Shared::init();
+        fprintf(stderr,"btop-gui: collecting data...\n");fflush(stderr);
+        Cpu::collect(false);Mem::collect(false);Net::collect(false);Proc::collect(false);
+    }catch(const exception&e){
+        fprintf(stderr,"btop-gui: ERROR in init: %s\n",e.what());fflush(stderr);
+        return false;
+    }catch(...){
+        fprintf(stderr,"btop-gui: UNKNOWN ERROR in init\n");fflush(stderr);
+        return false;
+    }
+    fprintf(stderr,"btop-gui: creating frame...\n");fflush(stderr);
+    MainFrame*f=new MainFrame();
+    fprintf(stderr,"btop-gui: showing...\n");fflush(stderr);
+    f->Show(true);
+    if(shot){wxTimer*st=new wxTimer(f);
         st->Bind(wxEVT_TIMER,[f,st](wxTimerEvent&){f->dash->RefreshState();f->dash->Refresh();f->Update();
             wxTimer*s2=new wxTimer(f);s2->Bind(wxEVT_TIMER,[f,s2](wxTimerEvent&){f->TakeScreenshot("/tmp/btop-gui-screenshot.png");f->Close();});s2->Start(500);st->Stop();});st->Start(2000);}
+    fprintf(stderr,"btop-gui: OnInit done\n");fflush(stderr);
     return true;}int BtopApp::OnExit(){return 0;}wxIMPLEMENT_APP(BtopApp);
