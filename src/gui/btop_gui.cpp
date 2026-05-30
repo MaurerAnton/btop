@@ -156,10 +156,13 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     fprintf(stderr,"DrawCPU: rect done\n");fflush(stderr);
     int iy=by+12,ix=bx+2;
     // CPU meter
+    fprintf(stderr,"DrawCPU: cpu meter...\n");fflush(stderr);
     long long pct=state.cpu_total.empty()?0:state.cpu_total.back();
     int meter_w=bw-4;Txt(dc,ix,iy,"CPU",MAIN_C,8,1);iy+=10;
     Bar(dc,ix,iy,meter_w,18,pct/100.0,CPU_C);
+    fprintf(stderr,"DrawCPU: meter done\n");fflush(stderr);
     iy+=20;
+    fprintf(stderr,"DrawCPU: pct text...\n");fflush(stderr);
     Txt(dc,ix,iy,wxString::Format("%lld%%",pct),MAIN_C,10,1);iy+=10;
     // Temp
     if(state.cpu_temp>0){Txt(dc,ix,iy,wxString::Format("Temp %lld°C",state.cpu_temp),TEMP_C,8);iy+=10;}
@@ -167,6 +170,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     if(state.battery_pct>=0){Txt(dc,ix,iy,wxString::Format("BAT %d%%",state.battery_pct),TGREEN,8);iy+=10;}
     iy+=4;
     // Per-core list in inner box
+    fprintf(stderr,"DrawCPU: per-core...\n");fflush(stderr);
     int ncores=max(1,(int)state.cpu_cores.size()),items_per_col=(bh-iy+by)/11;
     int cols=1;if(bw>90)cols=2; // need 90px+ for 2 columns to fit bars
     for(int col=0;col<cols;col++){int cix=ix+col*(bw/cols),ciy=iy;
@@ -177,6 +181,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
             wxColour cb=cp>90?wxColour(220,50,50):cp>75?wxColour(240,150,30):wxColour(60,180,75);
             Bar(dc,cix+24,ciy+1,(bw/cols)-50,8,cp/100.0,cb);
             Txt(dc,cix+(bw/cols)-24,ciy,wxString::Format("%.0f%%",cp),MAIN_C,7);ciy+=11;}}
+    fprintf(stderr,"DrawCPU: per-core done, start graph\n");fflush(stderr);
     // CPU graph on the left
     int gx=x+4,gy=y+title_h,gw=ow-bw-8,gh=oh-title_h-34;
     fprintf(stderr,"DrawCPU: graph gx=%d gy=%d gw=%d gh=%d\n",gx,gy,gw,gh);fflush(stderr);
