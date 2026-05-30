@@ -67,12 +67,14 @@ void Dashboard::OnPaint(wxPaintEvent&){wxAutoBufferedPaintDC dc(this);DoPaint(dc
 void Dashboard::DrawBox(wxDC&dc,int x,int y,int w,int h,const wxColour&fill,const wxColour&border){
     if(w<=0||h<=0)return;
     dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(fill));dc.DrawRectangle(x,y,w,h);
-    dc.SetPen(wxPen(border,2));dc.SetBrush(*wxTRANSPARENT_BRUSH);dc.DrawRectangle(x,y,w,h);}
+    dc.SetPen(wxPen(border,1));dc.SetBrush(*wxTRANSPARENT_BRUSH);dc.DrawRectangle(x,y,w,h);}
 
 void Dashboard::DrawInnerBox(wxDC&dc,int x,int y,int w,int h,const wxString&title){
     DrawBox(dc,x,y,w,h,BOX_FILL,DIV_C);
-    if(!title.empty()){dc.SetTextForeground(TITLE_C);dc.SetFont(wxFont(8,wxFONTFAMILY_TELETYPE,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD));
-        int tw,th;dc.GetTextExtent(title,&tw,&th);dc.DrawText(title,x+(w-tw)/2,y+1);}}
+    // Title in inner box header
+    dc.SetTextForeground(TITLE_C);
+    dc.SetFont(wxFont(7,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD));
+    dc.DrawText(title,x+2,y+1);}
 
 void Dashboard::Txt(wxDC&dc,int x,int y,const wxString&s,const wxColour&c,int sz,bool b){
     dc.SetTextForeground(c);dc.SetFont(wxFont(sz,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,b?wxFONTWEIGHT_BOLD:wxFONTWEIGHT_NORMAL));dc.DrawText(s,x,y);}
