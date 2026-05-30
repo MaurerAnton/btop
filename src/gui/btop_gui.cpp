@@ -111,13 +111,13 @@ void Dashboard::LineG(wxDC&dc,int x,int y,int w,int h,const deque<long long>&d,l
 
 // ─── Layout ───────────────────────────────────────────────
 void Dashboard::DoPaint(wxDC&dc){
-    // MINIMAL TEST
-    dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(wxColour(50,50,50)));
-    dc.DrawRectangle(10,10,300,200);
-    dc.SetTextForeground(wxColour(200,200,200));
-    dc.SetFont(wxFont(14,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD));
-    dc.DrawText("btop-gui test",20,30);
-    return;
+    wxSize sz=GetClientSize();int W=max(680,sz.x);
+    if(W<100)return;
+    int gap=2,x=2,y=2;
+    int cpu_w=W-4,cpu_h=show_cpu?CpuH(cpu_w):0;
+    fprintf(stderr,"cpu_w=%d cpu_h=%d\n",cpu_w,cpu_h);fflush(stderr);
+    if(show_cpu){DrawCPU(dc,x,y,cpu_w,cpu_h);y+=cpu_h+gap;}
+    fprintf(stderr,"cpu done y=%d\n",y);fflush(stderr);
 }
 
 int Dashboard::CpuH(int w){int ncores=max(1,(int)state.cpu_cores.size()),cols=max(1,(w-24)/160);
