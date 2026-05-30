@@ -1,4 +1,4 @@
-// btop-gui v6 — terminal-accurate: CPU top, Mem+Net left, Proc right
+// btop-gui v7 — full visual fidelity
 #ifndef BTOP_GUI_H
 #define BTOP_GUI_H
 #include <wx/wx.h>
@@ -8,18 +8,19 @@
 #include <wx/scrolwin.h>
 #include "btop_shared.hpp"
 #include "btop_config.hpp"
-namespace Cpu{extern cpu_info current_cpu;}namespace Mem{extern mem_info current_mem;}namespace Proc{extern std::vector<proc_info> current_procs;}
+namespace Cpu{extern cpu_info current_cpu;}namespace Mem{extern mem_info current_mem;}namespace Proc{extern std::vector<proc_info>current_procs;}
 
 class Dashboard:public wxScrolledWindow{public:
     Dashboard(wxWindow*p);bool show_cpu=true,show_mem=true,show_net=true,show_proc=true;void DoPaint(wxDC&dc);void RefreshState();
 private:
-    void OnPaint(wxPaintEvent&);int CalcCpuH(int w),CalcNetH(int w),CalcMemH(int w),CalcProcH(int w);
+    void OnPaint(wxPaintEvent&);int CpuH(int w),NetH(int w),MemH(int w),ProcH(int w);
     void DrawCPU(wxDC&,int x,int y,int w,int h);void DrawNet(wxDC&,int x,int y,int w,int h);
     void DrawMem(wxDC&,int x,int y,int w,int h);void DrawProc(wxDC&,int x,int y,int w,int h);
-    void Box(wxDC&,int x,int y,int w,int h);void TitleC(wxDC&,int x,int y,int w,const wxString&s);
-    void Text(wxDC&,int x,int y,const wxString&s,const wxColour&c,int sz=8,bool b=false);
+    void DrawBox(wxDC&,int x,int y,int w,int h,const wxColour&fill,const wxColour&border);
+    void DrawInnerBox(wxDC&,int x,int y,int w,int h,const wxString&title);
+    void Txt(wxDC&,int x,int y,const wxString&s,const wxColour&c,int sz=8,bool b=false);
     void Bar(wxDC&,int x,int y,int w,int h,double p,const wxColour&c);
-    void Graph(wxDC&,int x,int y,int w,int h,const std::deque<long long>&d,long long mx,const wxColour&c);
+    void LineG(wxDC&,int x,int y,int w,int h,const std::deque<long long>&d,long long mx,const wxColour&c,bool border);
     struct{std::deque<long long>cpu_total;std::string cpu_name,cpu_freq;std::vector<std::deque<long long>>cpu_cores;
         double loadavg[3];long long cpu_temp=0;int battery_pct=-1;
         uint64_t mem_total=0,mem_used=0,mem_avail=0,mem_cache=0,mem_free=0,swap_total=0,swap_used=0,swap_free=0;
