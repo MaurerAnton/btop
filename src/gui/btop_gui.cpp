@@ -65,17 +65,8 @@ void Dashboard::RefreshState(){
 // ─── Drawing primitives ────────────────────────────────────
 void Dashboard::OnPaint(wxPaintEvent&){
     painting=true;
-    wxSize sz=GetClientSize();
-    if(sz.x<100||sz.y<10)return;
-    // Add 100px padding to avoid edge corruption in wxMemoryDC
-    int pw=sz.x+100,ph=sz.y+200;
-    wxBitmap bmp(pw,ph);
-    wxMemoryDC mdc(bmp);
-    mdc.SetBackground(wxBrush(BG));mdc.Clear();
-    DoPaint(mdc);
-    mdc.SelectObject(wxNullBitmap);
-    wxPaintDC pdc(this);
-    pdc.DrawBitmap(bmp,0,0);
+    wxPaintDC dc(this);
+    DoPaint(dc);
     painting=false;
 }
 
@@ -113,6 +104,7 @@ void Dashboard::LineG(wxDC&dc,int x,int y,int w,int h,const deque<long long>&d,l
 void Dashboard::DoPaint(wxDC&dc){
     wxSize sz=GetClientSize();int W=max(680,sz.x);
     if(W<100)return;
+    dc.SetBackground(wxBrush(BG));dc.Clear();
     int gap=2,x=2,y=2;
     int cpu_w=W-4,cpu_h=show_cpu?CpuH(cpu_w):0;
     fprintf(stderr,"cpu_w=%d cpu_h=%d\n",cpu_w,cpu_h);fflush(stderr);
