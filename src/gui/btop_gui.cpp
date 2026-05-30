@@ -111,25 +111,13 @@ void Dashboard::LineG(wxDC&dc,int x,int y,int w,int h,const deque<long long>&d,l
 
 // ─── Layout ───────────────────────────────────────────────
 void Dashboard::DoPaint(wxDC&dc){
-    fprintf(stderr,"DoPaint start\n");fflush(stderr);
-    wxSize sz=GetClientSize();int W=max(680,sz.x);(void)sz.y;
-    if(W<100)return;
-    int gap=2,x=2,y=2;
-
-    int cpu_w=W-4,cpu_h=show_cpu?CpuH(cpu_w):0;
-    fprintf(stderr,"DoPaint: cpu_w=%d cpu_h=%d\n",cpu_w,cpu_h);fflush(stderr);
-    if(show_cpu){DrawCPU(dc,x,y,cpu_w,cpu_h);y+=cpu_h+gap;}
-    fprintf(stderr,"DoPaint: CPU done, y=%d\n",y);fflush(stderr);
-
-    // Rows 2-3: Mem+Net left (45%), Proc right (55%)
-    int lw=(W-6)*45/100,rw=W-6-lw-gap;
-    int mh=show_mem?MemH(lw):0,nh=show_net?NetH(lw):0,ph=show_proc?ProcH(rw):0;
-    int ch=max(mh+nh+gap,ph);
-    if(show_mem)DrawMem(dc,x,y,lw,mh);
-    if(show_net)DrawNet(dc,x,y+mh+gap,lw,nh);
-    if(show_proc)DrawProc(dc,x+lw+gap,y,rw,ch);
-    y+=ch+gap;
-    int nh2=y+8;if(abs(nh2-paint_h)>20){paint_h=nh2;SetVirtualSize(W,paint_h);}
+    // MINIMAL TEST
+    dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(wxColour(50,50,50)));
+    dc.DrawRectangle(10,10,300,200);
+    dc.SetTextForeground(wxColour(200,200,200));
+    dc.SetFont(wxFont(14,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD));
+    dc.DrawText("btop-gui test",20,30);
+    return;
 }
 
 int Dashboard::CpuH(int w){int ncores=max(1,(int)state.cpu_cores.size()),cols=max(1,(w-24)/160);
