@@ -145,8 +145,7 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
 #ifdef __linux__
     if(Shared::physical_cores>0){nm+=" ["+to_string(Shared::physical_cores)+"C";if(Shared::smt_enabled)nm+="/"+to_string(Shared::coreCount)+"T";nm+="]";}
 #endif
-    int bw=ow*38/100;if(bw<28)bw=28;if(bw>65)bw=65; // Inner stats box width
-    int bx=x+ow-bw-2,by=y+1,bh=oh-2;
+    int bw=ow*38/100;if(bw<28)bw=28;if(bw>65)bw=65;
     // Title bar in outer box
     fprintf(stderr,"DrawCPU: title bar\n");fflush(stderr);
     dc.SetTextForeground(HI_C);Txt(dc,x+4,y+2,"m",HI_C,8,1);Txt(dc,x+12,y+2,"enu",TITLE_C,8);
@@ -155,58 +154,39 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     {dc.SetTextForeground(TITLE_C);wxFont f(8,wxFONTFAMILY_TELETYPE,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD);dc.SetFont(f);
         int tw,th;dc.GetTextExtent(wxString::FromUTF8(nm),&tw,&th);dc.DrawText(wxString::FromUTF8(nm),x+(ow-tw)/2,y+2);}
     if(!state.cpu_freq.empty())Txt(dc,x+ow-bw-70,y+2,wxString::FromUTF8(state.cpu_freq),TGREEN,8);
-    // Inner stats box on right
-    fprintf(stderr,"DrawCPU: inner box bw=%d bx=%d by=%d bh=%d\n",bw,bx,by,bh);fflush(stderr);
-    // Draw stats directly without inner box border to avoid edge crash
-    fprintf(stderr,"DrawCPU: fill rect...\n");fflush(stderr);
-    dc.SetPen(*wxTRANSPARENT_PEN);
-    fprintf(stderr,"DrawCPU: setbrush...\n");fflush(stderr);
-    dc.SetBrush(wxBrush(BOX_FILL));
-    fprintf(stderr,"DrawCPU: drawrect...\n");fflush(stderr);
-    dc.DrawRectangle(bx,by,bw,bh);
-    fprintf(stderr,"DrawCPU: rect done\n");fflush(stderr);
-    int iy=by+12,ix=bx+2;
-    // CPU meter
-    fprintf(stderr,"DrawCPU: cpu meter...\n");fflush(stderr);
-    long long pct=state.cpu_total.empty()?0:state.cpu_total.back();
-    int meter_w=bw-4;Txt(dc,ix,iy,"CPU",MAIN_C,8,1);iy+=10;
-    Bar(dc,ix,iy,meter_w,18,pct/100.0,CPU_C);
-    fprintf(stderr,"DrawCPU: meter done\n");fflush(stderr);
-    iy+=20;
-    fprintf(stderr,"DrawCPU: pct text...\n");fflush(stderr);
-    Txt(dc,ix,iy,wxString::Format("%lld%%",pct),MAIN_C,10,1);iy+=10;
-    // Temp
-    if(state.cpu_temp>0){Txt(dc,ix,iy,wxString::Format("Temp %lld°C",state.cpu_temp),TEMP_C,8);iy+=10;}
-    // Battery
-    if(state.battery_pct>=0){Txt(dc,ix,iy,wxString::Format("BAT %d%%",state.battery_pct),TGREEN,8);iy+=10;}
-    iy+=4;
-    // Per-core list in inner box
-    fprintf(stderr,"DrawCPU: per-core...\n");fflush(stderr);
-    int ncores=max(1,(int)state.cpu_cores.size()),items_per_col=(bh-iy+by)/11;
-    int cols=1;if(bw>90)cols=2; // need 90px+ for 2 columns to fit bars
-    for(int col=0;col<cols;col++){int cix=ix+col*(bw/cols),ciy=iy;
-        for(int i=col*items_per_col;i<ncores&&i<(col+1)*items_per_col;i++){
-            if(ciy>by+bh-10)break;
-            Txt(dc,cix,ciy,wxString::Format("C%d",i),TGREY,7);
-            double cp=0;if(i<(int)state.cpu_cores.size()&&!state.cpu_cores[i].empty())cp=state.cpu_cores[i].back();
-            wxColour cb=cp>90?wxColour(220,50,50):cp>75?wxColour(240,150,30):wxColour(60,180,75);
-            Bar(dc,cix+24,ciy+1,(bw/cols)-50,8,cp/100.0,cb);
-            Txt(dc,cix+(bw/cols)-24,ciy,wxString::Format("%.0f%%",cp),MAIN_C,7);ciy+=11;}}
-    fprintf(stderr,"DrawCPU: per-core done, start graph\n");fflush(stderr);
-    // CPU graph on the left
-    int gx=x+4,gy=y+title_h,gw=ow-bw-8,gh=oh-title_h-34;
+    y+=title_h;
+    // CPU graph
+    int gx=x+4,gy=y,gw=ow-8,gh=oh-title_h-16;
     fprintf(stderr,"DrawCPU: graph gx=%d gy=%d gw=%d gh=%d\n",gx,gy,gw,gh);fflush(stderr);
     if(gh>10){
         fprintf(stderr,"DrawCPU: lineg start\n");fflush(stderr);
         LineG(dc,gx,gy,gw,gh,state.cpu_total,100,CPU_C,true);
         fprintf(stderr,"DrawCPU: lineg done\n");fflush(stderr);
-        // Big % in graph center
-        wxString ps=wxString::Format("%lld%%",pct);dc.SetFont(wxFont(16,wxFONTFAMILY_DEFAULT,wxFONTSTYLE_NORMAL,wxFONTWEIGHT_BOLD));
-        int tw,th;dc.GetTextExtent(ps,&tw,&th);
-        dc.SetTextForeground(wxColour(230,230,230));dc.DrawText(ps,gx+(gw-tw)/2,gy+(gh-th)/2);}
-    // Load avg + uptime below graph
+    }
+    // Stats below graph
+    long long pct=state.cpu_total.empty()?0:state.cpu_total.back();
+    int sy=gy+gh+4;
+    Txt(dc,x+4,sy,wxString::Format("CPU %lld%%",pct),MAIN_C,10,1);
+    if(state.cpu_temp>0)Txt(dc,x+120,sy,wxString::Format("Temp %lld°C",state.cpu_temp),TEMP_C,8);
+    sy+=14;
     ostringstream si;si<<"Load avg: "<<fixed<<setprecision(2)<<state.loadavg[0]<<" "<<state.loadavg[1]<<" "<<state.loadavg[2];
-    si<<"   Up: "<<sf(Tools::system_uptime());Txt(dc,gx,gy+gh+3,wxString::FromUTF8(si.str()),MAIN_C,8);}
+    si<<"   Up: "<<sf(Tools::system_uptime());
+    if(state.battery_pct>=0)si<<"   BAT: "<<state.battery_pct<<"%";
+    Txt(dc,x+4,sy,wxString::FromUTF8(si.str()),MAIN_C,8);
+    sy+=14;
+    // Per-core bars in a grid
+    int ncores=max(1,(int)state.cpu_cores.size());
+    int cols2=max(1,(ow-8)/160);
+    for(int i=0;i<ncores;i++){
+        int cx=x+4+(i%cols2)*(ow/cols2),cy=sy+(i/cols2)*11;
+        if(cy>y+oh-10)break;
+        Txt(dc,cx,cy,wxString::Format("C%d",i),TGREY,7);
+        double cp=0;if(i<(int)state.cpu_cores.size()&&!state.cpu_cores[i].empty())cp=state.cpu_cores[i].back();
+        wxColour cb=cp>90?wxColour(220,50,50):cp>75?wxColour(240,150,30):wxColour(60,180,75);
+        Bar(dc,cx+22,cy+1,(ow/cols2)-50,8,cp/100.0,cb);
+        Txt(dc,cx+(ow/cols2)-26,cy,wxString::Format("%.0f%%",cp),MAIN_C,7);
+    }
+}
 
 // ─── Net Box ──────────────────────────────────────────────
 void Dashboard::DrawNet(wxDC&dc,int x,int y,int w,int h){
