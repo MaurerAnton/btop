@@ -91,14 +91,16 @@ void Dashboard::LineG(wxDC&dc,int x,int y,int w,int h,const deque<long long>&d,l
 
 // ─── Layout ───────────────────────────────────────────────
 void Dashboard::DoPaint(wxDC&dc){
+    fprintf(stderr,"DoPaint start\n");fflush(stderr);
     wxSize sz=GetClientSize();int W=max(680,sz.x);(void)sz.y;
-    if(W<100)return; // safety
+    if(W<100)return;
     dc.SetBackground(wxBrush(BG));dc.Clear();
     int gap=2,x=2,y=2;
 
-    // Row 1: CPU full width
     int cpu_w=W-4,cpu_h=show_cpu?CpuH(cpu_w):0;
+    fprintf(stderr,"DoPaint: cpu_w=%d cpu_h=%d\n",cpu_w,cpu_h);fflush(stderr);
     if(show_cpu){DrawCPU(dc,x,y,cpu_w,cpu_h);y+=cpu_h+gap;}
+    fprintf(stderr,"DoPaint: CPU done, y=%d\n",y);fflush(stderr);
 
     // Rows 2-3: Mem+Net left (45%), Proc right (55%)
     int lw=(W-6)*45/100,rw=W-6-lw-gap;
