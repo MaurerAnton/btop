@@ -143,7 +143,8 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     if(!state.cpu_freq.empty())Txt(dc,x+ow-bw-70,y+2,wxString::FromUTF8(state.cpu_freq),TGREEN,8);
     // Inner stats box on right
     fprintf(stderr,"DrawCPU: inner box bw=%d bx=%d by=%d bh=%d\n",bw,bx,by,bh);fflush(stderr);
-    DrawInnerBox(dc,bx,by,bw,bh,wxString::FromUTF8(nm));
+    // Draw stats directly without inner box border to avoid edge crash
+    dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(BOX_FILL));dc.DrawRectangle(bx,by,bw,bh);
     int iy=by+12,ix=bx+2;
     // CPU meter
     long long pct=state.cpu_total.empty()?0:state.cpu_total.back();
