@@ -1,184 +1,126 @@
-// btop-gui: wxWidgets GUI frontend for btop++
-// Uses existing btop data collection backend, renders with native widgets
+// btop-gui v3: single dashboard layout matching terminal btop
+// wxWidgets frontend with all sections visible at once, no tabs
+// screenshot support for headless comparison
 
 #ifndef BTOP_GUI_H
 #define BTOP_GUI_H
 
 #include <wx/wx.h>
-#include <wx/aui/auibook.h>
-#include <wx/notebook.h>
-#include <wx/listctrl.h>
-#include <wx/stattext.h>
-#include <wx/gauge.h>
-#include <wx/timer.h>
 #include <wx/dcclient.h>
 #include <wx/dcbuffer.h>
-#include <wx/splitter.h>
+#include <wx/timer.h>
+#include <wx/gauge.h>
+#include <wx/listctrl.h>
 #include <wx/combobox.h>
 #include <wx/textctrl.h>
-
-#include <deque>
-#include <vector>
-#include <string>
-#include <cmath>
-#include <algorithm>
-#include <unordered_map>
+#include <wx/scrolwin.h>
+#include <wx/image.h>
 
 #include "btop_shared.hpp"
 #include "btop_config.hpp"
 
-// Extern data structs from platform collectors (not declared in btop_shared.hpp)
-namespace Cpu {
-    extern cpu_info current_cpu;
-}
-namespace Mem {
-    extern mem_info current_mem;
-}
-namespace Proc {
-    extern std::vector<proc_info> current_procs;
-}
+namespace Cpu { extern cpu_info current_cpu; }
+namespace Mem { extern mem_info current_mem; }
+namespace Proc { extern std::vector<proc_info> current_procs; }
 
-// ─── Graph Widget ───────────────────────────────────────────────
+// ─── Graph canvas ──────────────────────────────────────────
 
-class GraphPanel : public wxPanel {
+class GraphStrip : public wxWindow {
 public:
-    GraphPanel(wxWindow* parent, wxWindowID id = wxID_ANY,
-               const wxPoint& pos = wxDefaultPosition,
-               const wxSize& size = wxDefaultSize);
+    GraphStrip(wxWindow* p, const wxSize& sz = wxSize(400, 24));
 
-    void SetData(const std::deque<long long>& data);
-    void SetMax(long long max_val) { graph_max = max_val; }
+    void SetData(const std::deque<long long>& d) { data = d; Refresh(false); }
+    void SetMax(long long m) { gmax = m; }
     void SetColor(const wxColour& c) { color = c; }
-    void SetAutoScale(bool a) { autoscale = a; }
-    void SetTitle(const wxString& t) { title = t; }
+    void SetAuto(bool a) { autoscale = a; }
 
 private:
-    void OnPaint(wxPaintEvent& evt);
-    void OnSize(wxSizeEvent& evt);
-
-    std::deque<long long> graph_data;
-    long long graph_max = 100;
+    void OnPaint(wxPaintEvent&);
+    std::deque<long long> data;
+    wxColour color{60,180,75};
+    long long gmax = 100;
     bool autoscale = true;
-    wxColour color{60, 180, 75};
-    wxString title;
+    wxDECLARE_EVENT_TABLE();
+};
+
+// ─── Dashboard (single scrollable canvas) ──────────────────
+
+class Dashboard : public wxScrolledWindow {
+public:
+    Dashboard(wxWindow* parent);
+
+private:
+    void OnTimer(wxTimerEvent&);
+    void OnPaint(wxPaintEvent&);
+    void DrawCPU(wxDC& dc, int& y, int x, int w);
+    void DrawMem(wxDC& dc, int& y, int x, int w);
+    void DrawNet(wxDC& dc, int& y, int x, int w);
+    void DrawProc(wxDC& dc, int& y, int x, int w);
+
+    // Box drawing helpers
+    void DrawBox(wxDC& dc, int x, int y, int w, int h, const wxString& title, const wxColour& border);
+    void DrawGauge(wxDC& dc, int x, int y, int w, int h, double pct, const wxColour& c);
+    void DrawLineGraph(wxDC& dc, int x, int y, int w, int h, const std::deque<long long>& d,
+                       long long max, const wxColour& c, bool autoscale);
+
+    // Data stores (populated from collectors)
+    struct {
+        // CPU
+        std::deque<long long> cpu_total;
+        std::string cpu_name, cpu_freq;
+        std::vector<std::deque<long long>> cpu_cores;
+        double loadavg[3] = {0,0,0};
+        long long cpu_temp = 0, cpu_tmax = 90;
+        int battery_pct = -1;
+        std::string battery_status;
+
+        // Memory
+        uint64_t mem_total = 0, mem_used = 0, mem_avail = 0, mem_cache = 0, mem_free = 0;
+        uint64_t swap_total = 0, swap_used = 0, swap_free = 0;
+
+        // Network
+        std::deque<long long> net_dl, net_ul;
+        uint64_t net_dl_speed = 0, net_ul_speed = 0;
+        uint64_t net_dl_total = 0, net_ul_total = 0;
+        uint64_t net_dl_avg = 0, net_ul_avg = 0;
+        std::string net_iface, net_ip;
+        bool net_connected = false;
+
+        // Processes
+        std::vector<Proc::proc_info> procs;
+    } state;
+
+    // Process scroll offset
+    int proc_scroll = 0;
+    int proc_max_visible = 0;
+
+    wxTimer* timer;
     wxBitmap backbuf;
+    int paint_w = 800, paint_h = 1200;
+
+public:
+    void DoPaint(wxDC& dc);
+
+private:
 
     wxDECLARE_EVENT_TABLE();
 };
 
-// ─── CPU Panel ────────────────────────────────────────────────
-
-class CpuPanel : public wxPanel {
-public:
-    CpuPanel(wxWindow* parent);
-
-    void RefreshData();
-
-private:
-    void BuildUI();
-    void UpdateStats();
-
-    GraphPanel* total_graph = nullptr;
-    std::vector<GraphPanel*> core_graphs;
-    std::vector<wxGauge*> core_gauges;
-    wxStaticText* cpu_name_label = nullptr;
-    wxStaticText* freq_label = nullptr;
-    wxStaticText* load_label = nullptr;
-    wxStaticText* uptime_label = nullptr;
-    wxStaticText* battery_label = nullptr;
-    wxStaticText* temp_label = nullptr;
-    wxStaticText* smt_label = nullptr;
-    wxTimer* timer = nullptr;
-};
-
-// ─── Memory Panel ─────────────────────────────────────────────
-
-class MemPanel : public wxPanel {
-public:
-    MemPanel(wxWindow* parent);
-
-    void RefreshData();
-
-private:
-    void BuildUI();
-    void UpdateStats();
-
-    wxGauge* ram_gauge = nullptr;
-    wxStaticText* ram_label = nullptr;
-    wxGauge* swap_gauge = nullptr;
-    wxStaticText* swap_label = nullptr;
-    wxStaticText* total_label = nullptr;
-    wxListCtrl* disk_list = nullptr;
-    wxTimer* timer = nullptr;
-};
-
-// ─── Network Panel ────────────────────────────────────────────
-
-class NetPanel : public wxPanel {
-public:
-    NetPanel(wxWindow* parent);
-
-    void RefreshData();
-
-private:
-    void BuildUI();
-    void UpdateStats();
-
-    GraphPanel* dl_graph = nullptr;
-    GraphPanel* ul_graph = nullptr;
-    wxStaticText* dl_speed_label = nullptr;
-    wxStaticText* ul_speed_label = nullptr;
-    wxStaticText* dl_total_label = nullptr;
-    wxStaticText* ul_total_label = nullptr;
-    wxStaticText* dl_avg_label = nullptr;
-    wxStaticText* ul_avg_label = nullptr;
-    wxStaticText* iface_label = nullptr;
-    wxStaticText* ip_label = nullptr;
-    wxComboBox* iface_choice = nullptr;
-    wxTimer* timer = nullptr;
-};
-
-// ─── Process Panel ───────────────────────────────────────────
-
-class ProcPanel : public wxPanel {
-public:
-    ProcPanel(wxWindow* parent);
-
-    void RefreshData();
-
-private:
-    void BuildUI();
-    void UpdateList();
-    void OnColClick(wxListEvent& evt);
-
-    wxListCtrl* proc_list = nullptr;
-    wxStaticText* count_label = nullptr;
-    wxTextCtrl* filter_text = nullptr;
-    wxTimer* timer = nullptr;
-    int sort_col = 3;
-    bool sort_asc = false;
-    wxDECLARE_EVENT_TABLE();
-};
-
-// ─── Main Frame ───────────────────────────────────────────────
+// ─── Main frame ────────────────────────────────────────────
 
 class MainFrame : public wxFrame {
 public:
     MainFrame();
+    void TakeScreenshot(const wxString& path);
 
 private:
-    void OnClose(wxCloseEvent& evt);
-
-    wxAuiNotebook* notebook = nullptr;
-    CpuPanel* cpu_panel = nullptr;
-    MemPanel* mem_panel = nullptr;
-    NetPanel* net_panel = nullptr;
-    ProcPanel* proc_panel = nullptr;
-
+    void OnClose(wxCloseEvent&);
+    void OnKeyDown(wxKeyEvent&);
+    Dashboard* dash = nullptr;
     wxDECLARE_EVENT_TABLE();
 };
 
-// ─── App ──────────────────────────────────────────────────────
+// ─── App ───────────────────────────────────────────────────
 
 class BtopApp : public wxApp {
 public:
@@ -186,4 +128,4 @@ public:
     int OnExit() override;
 };
 
-#endif // BTOP_GUI_H
+#endif

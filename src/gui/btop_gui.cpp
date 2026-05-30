@@ -1,630 +1,600 @@
-// btop-gui: wxWidgets GUI for btop++ — implementation v2
+// btop-gui v3 — single dashboard layout matching terminal btop
 #include "btop_gui.h"
 #include <sstream>
 #include <iomanip>
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 
 using namespace std;
 
-// ─── Stubs for btop.o symbols ────────────────────────────────
+// ─── Stubs ─────────────────────────────────────────────────
 namespace Runner {
-    atomic<bool> stopping{false};
-    atomic<bool> coreNum_reset{false};
-    atomic<bool> active{false};
-    atomic<bool> redraw{false};
+    atomic<bool> stopping{false}, coreNum_reset{false}, active{false}, redraw{false};
     bool pause_output = false;
 }
 namespace Global {
     const string Version = "1.4.7-gui";
     string overlay, exit_error_msg, clock;
-    atomic<bool> resized{false};
-    atomic<bool> init_conf{true};
-    atomic<bool> quitting{false};
-    uid_t real_uid = 0, set_uid = 0;
-    const vector<array<string, 2>> Banner_src;
+    atomic<bool> resized{false}, init_conf{true}, quitting{false};
+    uid_t real_uid=0, set_uid=0;
+    const vector<array<string,2>> Banner_src;
 }
-namespace Cpu { int width = 100, min_width = 60, min_height = 8; }
-namespace Mem { int width = 300, min_width = 36, min_height = 6; bool redraw = true; }
-namespace Net { int width = 300, min_width = 36, min_height = 6; bool redraw = true; }
-namespace Proc { int width = 300, min_width = 44, min_height = 16; bool redraw = true, shown = true;
-    int select_max = 1, selected_pid = 0, start = 0, selected = 0, selected_depth = 0;
+namespace Cpu { int width=100, min_width=60, min_height=8; }
+namespace Mem { int width=300, min_width=36, min_height=6; bool redraw=true; }
+namespace Net { int width=300, min_width=36, min_height=6; bool redraw=true; }
+namespace Proc { int width=300, min_width=44, min_height=16; bool redraw=true, shown=true;
+    int select_max=1, selected_pid=0, start=0, selected=0, selected_depth=0;
     string selected_name; }
-namespace Gpu { int width = 100, min_width = 36, count = 0, shown = 0; }
-namespace Menu { bool active = false, redraw = false; }
+namespace Gpu { int width=100, min_width=36, count=0, shown=0; }
+namespace Menu { bool active=false, redraw=false; }
 void clean_quit(int) {}
-namespace Input { unordered_map<string, array<int, 4>> mouse_mappings; }
+namespace Input { unordered_map<string, array<int,4>> mouse_mappings; }
 
-// ─── Helpers ──────────────────────────────────────────────────
-
-static wxColour cpu_color(double pct) {
-    if (pct > 90) return wxColour(220, 50, 50);
-    if (pct > 75) return wxColour(240, 150, 30);
-    if (pct > 50) return wxColour(220, 200, 40);
-    return wxColour(60, 180, 75);
-}
+// ─── Color scheme (matches btop's default theme) ────────────
+static wxColour BG(30,30,30);
+static wxColour BOX_BG(35,35,35);
+static wxColour BORDER(60,60,60);
+static wxColour TITLE_FG(100,200,240);
+static wxColour MAIN_FG(200,200,200);
+static wxColour DIV(70,70,70);
+static wxColour GRAPH_CPU(80,180,220);
+static wxColour GRAPH_DL(60,200,80);
+static wxColour GRAPH_UL(220,140,40);
+static wxColour GAUGE_RAM(60,180,75);
+static wxColour GAUGE_SWAP(200,160,60);
+static wxColour GAUGE_USED(180,50,50);
+static wxColour GAUGE_CACHED(220,180,40);
 
 static string human_bytes(uint64_t b) {
-    const char* u[] = {"B","KB","MB","GB","TB"};
-    double v = b; int i = 0;
-    while (v >= 1000 && i < 4) { v/=1000; i++; }
+    const char* u[]={"B","KB","MB","GB","TB"};
+    double v=b; int i=0;
+    while(v>=1000&&i<4){v/=1000;i++;}
     ostringstream ss;
-    ss << fixed << setprecision(v<10?1:0) << v << " " << u[i];
+    ss<<fixed<<setprecision(v<10?1:0)<<v<<" "<<u[i];
     return ss.str();
 }
-
-static string speed_str(uint64_t bps) {
-    return human_bytes(bps) + "/s";
-}
-
+static string speed_str(uint64_t bps) { return human_bytes(bps)+"/s"; }
 static string sec_fmt(double s) {
     int d=s/86400, h=((int)s%86400)/3600, m=((int)s%3600)/60;
-    char buf[64];
-    if (d) snprintf(buf,sizeof(buf),"%dd %02d:%02d",d,h,m);
-    else snprintf(buf,sizeof(buf),"%02d:%02d:%02d",h,m,(int)s%60);
-    return buf;
+    char b[64];
+    if(d) snprintf(b,sizeof(b),"%dd %02d:%02d",d,h,m);
+    else snprintf(b,sizeof(b),"%02d:%02d:%02d",h,m,(int)s%60);
+    return b;
 }
 
-// ─── GraphPanel ────────────────────────────────────────────────
-
-wxBEGIN_EVENT_TABLE(GraphPanel, wxPanel)
-    EVT_PAINT(GraphPanel::OnPaint)
-    EVT_SIZE(GraphPanel::OnSize)
+// ─── GraphStrip ────────────────────────────────────────────
+wxBEGIN_EVENT_TABLE(GraphStrip, wxWindow)
+    EVT_PAINT(GraphStrip::OnPaint)
 wxEND_EVENT_TABLE()
 
-GraphPanel::GraphPanel(wxWindow* p, wxWindowID id, const wxPoint& pos, const wxSize& sz)
-    : wxPanel(p, id, pos, sz, wxBORDER_SIMPLE)
-{
+GraphStrip::GraphStrip(wxWindow* p, const wxSize& sz) : wxWindow(p, wxID_ANY, wxDefaultPosition, sz) {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
-    SetMinSize(wxSize(80, 30));
+    SetMinSize(wxSize(20,8));
 }
 
-void GraphPanel::SetData(const deque<long long>& d) { graph_data = d; Refresh(false); }
-
-void GraphPanel::OnSize(wxSizeEvent&) { backbuf = wxBitmap(); Refresh(); }
-
-void GraphPanel::OnPaint(wxPaintEvent&) {
+void GraphStrip::OnPaint(wxPaintEvent&) {
+    wxAutoBufferedPaintDC dc(this);
     wxSize sz = GetClientSize();
-    if (sz.x<4 || sz.y<4) return;
-    if (!backbuf.IsOk()) backbuf.Create(sz.x, sz.y);
-    wxBufferedPaintDC dc(this, backbuf);
-    dc.SetBackground(wxBrush(wxColour(35,35,35)));
+    dc.SetBackground(wxBrush(BOX_BG));
     dc.Clear();
-
-    dc.SetTextForeground(wxColour(160,160,160));
-    dc.SetFont(wxFont(7, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
-    dc.DrawText(title, 3, 2);
-
-    int gx=2, gy=14, gw=sz.x-4, gh=sz.y-18;
-    if (gh<4) return;
-    dc.SetPen(wxPen(wxColour(60,60,60)));
-    dc.SetBrush(*wxTRANSPARENT_BRUSH);
-    dc.DrawRectangle(gx, gy, gw, gh);
-
-    if (graph_data.size() < 2) return;
-    long long gmax = graph_max;
+    if (data.size()<2 || sz.x<4 || sz.y<2) return;
+    long long mx = gmax;
     if (autoscale) {
-        gmax = max(1ll, *max_element(graph_data.begin(), graph_data.end()));
-        gmax = max(gmax, graph_max);
+        mx = max(1ll, *max_element(data.begin(), data.end()));
+        mx = max(mx, gmax);
     }
-    int n = graph_data.size();
-    double xs = (double)gw / max(1, n-1);
-    double ys = (double)gh / max(1ll, gmax);
-    dc.SetPen(wxPen(color, 1));
+    int n=data.size(), gw=sz.x, gh=sz.y;
+    double xs=(double)gw/max(1,n-1), ys=(double)gh/max(1ll,mx);
+    dc.SetPen(wxPen(color,1));
     int lx=-1, ly=-1;
-    for (int i=0; i<n; i++) {
-        int x = gx + (int)(i*xs);
-        int y = gy+gh-1 - (int)(graph_data[i]*ys);
-        y = max(gy, min(gy+gh-1, y));
-        if (lx>=0) dc.DrawLine(lx, ly, x, y);
+    for(int i=0;i<n;i++) {
+        int x=(int)(i*xs), y=gh-1-(int)(data[i]*ys);
+        y=max(0,min(gh-1,y));
+        if(lx>=0) dc.DrawLine(lx,ly,x,y);
         lx=x; ly=y;
     }
-    if (gmax>0) {
-        dc.SetTextForeground(wxColour(100,100,100));
-        dc.DrawText(speed_str(gmax), gx+2, gy+2);
-    }
 }
 
-// ─── CPU Panel ────────────────────────────────────────────────
+// ─── Dashboard ─────────────────────────────────────────────
+wxBEGIN_EVENT_TABLE(Dashboard, wxScrolledWindow)
+    EVT_PAINT(Dashboard::OnPaint)
+wxEND_EVENT_TABLE()
 
-CpuPanel::CpuPanel(wxWindow* p) : wxPanel(p) {
-    wxBoxSizer* ms = new wxBoxSizer(wxVERTICAL);
-
-    // Info row
-    wxBoxSizer* ir = new wxBoxSizer(wxHORIZONTAL);
-    cpu_name_label = new wxStaticText(this, wxID_ANY, "CPU");
-    cpu_name_label->SetFont(wxFont(11, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    cpu_name_label->SetForegroundColour(wxColour(220,220,220));
-    ir->Add(cpu_name_label, 0, wxALL, 4);
-    smt_label = new wxStaticText(this, wxID_ANY, "");
-    smt_label->SetForegroundColour(wxColour(160,160,160));
-    ir->Add(smt_label, 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    ir->AddStretchSpacer();
-    freq_label = new wxStaticText(this, wxID_ANY, "");
-    freq_label->SetForegroundColour(wxColour(120,200,120));
-    ir->Add(freq_label, 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    ms->Add(ir, 0, wxEXPAND);
-
-    // Total graph
-    total_graph = new GraphPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 130));
-    total_graph->SetTitle("CPU Usage %");
-    total_graph->SetMax(100);
-    total_graph->SetColor(wxColour(80,180,220));
-    ms->Add(total_graph, 1, wxEXPAND|wxALL, 4);
-
-    // Stats row
-    wxBoxSizer* sr = new wxBoxSizer(wxHORIZONTAL);
-    load_label = new wxStaticText(this, wxID_ANY, "Load: --");
-    load_label->SetForegroundColour(wxColour(200,180,100));
-    sr->Add(load_label, 0, wxALL, 4);
-    uptime_label = new wxStaticText(this, wxID_ANY, "Up: --");
-    uptime_label->SetForegroundColour(wxColour(140,180,200));
-    sr->Add(uptime_label, 0, wxALL, 4);
-    temp_label = new wxStaticText(this, wxID_ANY, "Temp: --");
-    temp_label->SetForegroundColour(wxColour(220,140,60));
-    sr->Add(temp_label, 0, wxALL, 4);
-    battery_label = new wxStaticText(this, wxID_ANY, "");
-    battery_label->SetForegroundColour(wxColour(180,200,100));
-    sr->Add(battery_label, 0, wxALL, 4);
-    ms->Add(sr, 0, wxEXPAND);
-
-    // Per-core header
-    wxStaticText* ch = new wxStaticText(this, wxID_ANY, "Per-Core Usage");
-    ch->SetForegroundColour(wxColour(160,160,160));
-    ch->SetFont(wxFont(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    ms->Add(ch, 0, wxALL, 4);
-
-    // Core grid
-    wxFlexGridSizer* cg = new wxFlexGridSizer(0, 3, 2, 4);
-    for (long i=0; i<Shared::coreCount; i++) {
-        wxStaticText* lb = new wxStaticText(this, wxID_ANY,
-            wxString::Format("C%ld", i), wxDefaultPosition, wxSize(32,16));
-        lb->SetForegroundColour(wxColour(180,180,180));
-        cg->Add(lb);
-
-        wxGauge* g = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxSize(80,14));
-        core_gauges.push_back(g);
-        cg->Add(g);
-
-        GraphPanel* gp = new GraphPanel(this, wxID_ANY, wxDefaultPosition, wxSize(100,28));
-        gp->SetMax(100);
-        gp->SetColor(wxColour(80,160,220));
-        core_graphs.push_back(gp);
-        cg->Add(gp);
-    }
-    ms->Add(cg, 0, wxEXPAND|wxALL, 4);
-
-    SetSizerAndFit(ms);
+Dashboard::Dashboard(wxWindow* p) : wxScrolledWindow(p, wxID_ANY) {
+    SetBackgroundStyle(wxBG_STYLE_PAINT);
+    SetScrollRate(8,8);
+    SetVirtualSize(800, 1600);
+    SetBackgroundColour(BG);
 
     timer = new wxTimer(this);
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&){ RefreshData(); }, timer->GetId());
+    timer->Bind(wxEVT_TIMER, [this](wxTimerEvent&){
+        // Collect all data inline
+        Cpu::collect(false);
+        Mem::collect(false);
+        Net::collect(false);
+        Proc::collect(false);
+        // Store CPU
+        auto& cpu = Cpu::current_cpu;
+        if (cpu.cpu_percent.contains("total"s)) state.cpu_total = cpu.cpu_percent.at("total"s);
+        state.cpu_name = Cpu::cpuName;
+        state.cpu_freq = Cpu::cpuHz;
+        for (size_t i=0; i<cpu.core_percent.size(); i++)
+            if (i>=state.cpu_cores.size()) state.cpu_cores.push_back(cpu.core_percent[i]);
+            else state.cpu_cores[i] = cpu.core_percent[i];
+        if (!cpu.load_avg.empty()) {
+            state.loadavg[0]=cpu.load_avg[0];
+            state.loadavg[1]=cpu.load_avg.size()>1?cpu.load_avg[1]:0;
+            state.loadavg[2]=cpu.load_avg.size()>2?cpu.load_avg[2]:0;
+        }
+        if (Cpu::got_sensors && !cpu.temp.empty() && !cpu.temp[0].empty()) {
+            state.cpu_temp = cpu.temp[0].back();
+            state.cpu_tmax = cpu.temp_max>0 ? cpu.temp_max : 90;
+        }
+        if (Cpu::has_battery) {
+            auto [pct, w, secs, status] = Cpu::current_bat;
+            state.battery_pct = pct;
+        }
+        // Store Mem
+        auto& mem = Mem::current_mem;
+        state.mem_total = Mem::get_totalMem();
+        state.mem_used = mem.stats["used"];
+        state.mem_avail = mem.stats["available"];
+        state.mem_cache = mem.stats["cached"];
+        state.mem_free = mem.stats["free"];
+        state.swap_total = mem.stats["swap_total"];
+        state.swap_used = mem.stats["swap_used"];
+        state.swap_free = mem.stats["swap_free"];
+        // Store Net
+        if (Net::current_net.contains(Net::selected_iface)) {
+            auto& net = Net::current_net.at(Net::selected_iface);
+            if (net.bandwidth.contains("download"s)) {
+                state.net_dl = net.bandwidth.at("download"s);
+                state.net_dl_speed = net.stat.at("download"s).speed;
+                state.net_dl_total = net.stat.at("download"s).total;
+                state.net_dl_avg = net.stat.at("download"s).avg_speed;
+            }
+            if (net.bandwidth.contains("upload"s)) {
+                state.net_ul = net.bandwidth.at("upload"s);
+                state.net_ul_speed = net.stat.at("upload"s).speed;
+                state.net_ul_total = net.stat.at("upload"s).total;
+                state.net_ul_avg = net.stat.at("upload"s).avg_speed;
+            }
+            state.net_ip = net.ipv4.empty() ? net.ipv6 : net.ipv4;
+            state.net_connected = net.connected;
+            state.net_iface = Net::selected_iface;
+        }
+        // Store Proc
+        state.procs = Proc::current_procs;
+        Refresh(false);
+    });
     timer->Start(1500);
 }
 
-void CpuPanel::RefreshData() {
-    Cpu::collect(false);
-    UpdateStats();
+void Dashboard::OnTimer(wxTimerEvent& evt) {
+    (void)evt;
 }
 
-void CpuPanel::UpdateStats() {
-    auto& cpu = Cpu::current_cpu;
-    if (cpu.cpu_percent.contains("total"s))
-        total_graph->SetData(cpu.cpu_percent.at("total"s));
+void Dashboard::OnPaint(wxPaintEvent&) {
+    wxAutoBufferedPaintDC dc(this);
+    DoPaint(dc);
+}
 
-    string name = Cpu::cpuName;
+void Dashboard::DoPaint(wxDC& dc) {
+    wxSize sz = GetClientSize();
+    int w = max(400, sz.x);
+    int total_h = 1600; // will be adjusted
+
+    // If virtual size needs updating
+    if (w != paint_w) {
+        paint_w = w;
+    }
+
+    dc.SetBackground(wxBrush(BG));
+    dc.Clear();
+
+    int y = 4, x = 2;
+    int cw = w - 4;
+
+    DrawCPU(dc, y, x, cw);
+    DrawMem(dc, y, x, cw);
+    DrawNet(dc, y, x, cw);
+    DrawProc(dc, y, x, cw);
+
+    // Update virtual height
+    int new_h = y + 8;
+    if (abs(new_h - paint_h) > 20) {
+        paint_h = new_h;
+        SetVirtualSize(w, paint_h);
+    }
+}
+
+// ─── Box drawing ──────────────────────────────────────────
+void Dashboard::DrawBox(wxDC& dc, int x, int y, int w, int h,
+                         const wxString& title, const wxColour& border) {
+    dc.SetPen(wxPen(border));
+    dc.SetBrush(wxBrush(BOX_BG));
+    dc.DrawRectangle(x, y, w, h);
+
+    if (!title.empty()) {
+        dc.SetTextForeground(TITLE_FG);
+        wxFont f(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD);
+        dc.SetFont(f);
+        int tw, th;
+        dc.GetTextExtent(title, &tw, &th);
+        int tx = x + (w - tw) / 2;
+        dc.DrawText(title, tx, y + 1);
+    }
+}
+
+// ─── CPU section ──────────────────────────────────────────
+void Dashboard::DrawCPU(wxDC& dc, int& y, int x, int w) {
+    int bw = w;
+    int title_h = 18, core_h = 12, bar_h = 10, gap = 3;
+
+    // Box
+    int box_h = title_h + 76 + gap + 14 + gap + 14 + gap;
+    // Per-core lines
+    int ncores = max(1, (int)state.cpu_cores.size());
+    int cols = max(1, (bw - 20) / 160);
+    int rows = (ncores + cols - 1) / cols;
+    box_h += rows * (core_h + gap) + 4;
+
+    DrawBox(dc, x, y, bw, box_h, "", BORDER);
+
+    // Title
+    dc.SetTextForeground(TITLE_FG);
+    wxFont tf(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD);
+    dc.SetFont(tf);
+    wxString ttl = wxString::FromUTF8(state.cpu_name);
 #ifdef __linux__
     if (Shared::physical_cores>0) {
-        if (Shared::smt_enabled)
-            name += " [" + to_string(Shared::physical_cores) + "C/" + to_string(Shared::coreCount) + "T]";
-        else
-            name += " [" + to_string(Shared::physical_cores) + "C]";
+        ttl += wxString::Format(" [%ldC]", Shared::physical_cores);
+        if (Shared::smt_enabled) ttl += wxString::Format("/%ldT", Shared::coreCount);
     }
-    smt_label->SetLabel(Shared::smt_enabled ? "SMT ON" : "");
 #endif
-    cpu_name_label->SetLabel(wxString::FromUTF8(name));
+    dc.DrawText(ttl, x+4, y+2);
+    if (!state.cpu_freq.empty()) {
+        dc.SetTextForeground(wxColour(120,200,120));
+        int tw, th;
+        dc.GetTextExtent(wxString::FromUTF8(state.cpu_freq), &tw, &th);
+        dc.DrawText(wxString::FromUTF8(state.cpu_freq), x+bw-tw-6, y+2);
+    }
+    dc.SetTextForeground(TITLE_FG);
+    y += title_h;
 
-    if (!Cpu::cpuHz.empty())
-        freq_label->SetLabel(wxString::FromUTF8(Cpu::cpuHz));
+    // CPU total graph
+    int gy = y, gh = 64, gw = bw - 8;
+    dc.SetPen(wxPen(wxColour(50,50,50)));
+    dc.SetBrush(wxBrush(wxColour(25,25,25)));
+    dc.DrawRectangle(x+4, gy, gw, gh);
+    DrawLineGraph(dc, x+4, gy, gw, gh, state.cpu_total, 100, GRAPH_CPU, false);
 
-    for (size_t i=0; i<core_graphs.size() && i<cpu.core_percent.size(); i++) {
-        core_graphs[i]->SetData(cpu.core_percent[i]);
-        if (!cpu.core_percent[i].empty()) {
-            int pct = (int)cpu.core_percent[i].back();
-            core_gauges[i]->SetValue(pct);
-            core_gauges[i]->SetForegroundColour(cpu_color(pct));
+    // CPU% label
+    long long cpu_pct = state.cpu_total.empty() ? 0 : state.cpu_total.back();
+    dc.SetTextForeground(wxColour(220,220,220));
+    wxFont bigf(20, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD);
+    dc.SetFont(bigf);
+    dc.DrawText(wxString::Format("%lld%%", cpu_pct), x+gw/2-25, gy+gh/2-12);
+
+    y += gh + gap;
+
+    // Load avg + uptime + temp + battery
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+    ostringstream info;
+    info << "Load: " << fixed << setprecision(2) << state.loadavg[0]
+         << " " << state.loadavg[1] << " " << state.loadavg[2]
+         << "  |  Up: " << sec_fmt(Tools::system_uptime());
+    if (state.cpu_temp > 0)
+        info << "  |  Temp: " << state.cpu_temp << "C";
+    if (state.battery_pct >= 0)
+        info << "  |  BAT: " << state.battery_pct << "%";
+    dc.SetTextForeground(wxColour(160,160,160));
+    dc.DrawText(wxString::FromUTF8(info.str()), x+6, y);
+    y += 16;
+
+    // Per-core bars
+    for (int r=0; r<rows; r++) {
+        int cy = y;
+        for (int c=0; c<cols; c++) {
+            int idx = r*cols + c;
+            if (idx >= ncores) break;
+            int cx = x + 4 + c * (bw/cols);
+            int cw2 = bw/cols - 4;
+
+            // Core label
+            dc.SetFont(wxFont(7, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+            dc.SetTextForeground(wxColour(140,140,140));
+            dc.DrawText(wxString::Format("C%d", idx), cx, cy);
+
+            // Mini graph
+            int mgx = cx + 24, mgw = cw2 - 70, mgh = core_h;
+            dc.SetPen(wxPen(wxColour(40,40,40)));
+            dc.SetBrush(wxBrush(wxColour(25,25,25)));
+            dc.DrawRectangle(mgx, cy, mgw, mgh);
+            if (idx < (int)state.cpu_cores.size())
+                DrawLineGraph(dc, mgx, cy, mgw, mgh, state.cpu_cores[idx], 100,
+                              wxColour(80,160,220), false);
+
+            // Percent bar + number
+            int bx = cx + cw2 - 44, bw3 = 40;
+            double pct = (idx < (int)state.cpu_cores.size() && !state.cpu_cores[idx].empty())
+                         ? state.cpu_cores[idx].back() : 0;
+            DrawGauge(dc, bx, cy+2, bw3, mgh-4, pct/100.0,
+                      pct>90?wxColour(220,50,50):pct>75?wxColour(240,150,30):wxColour(60,180,75));
+            dc.SetTextForeground(wxColour(200,200,200));
+            dc.DrawText(wxString::Format("%.0f%%", pct), bx+bw3+2, cy+1);
         }
+        y += core_h + gap;
     }
-
-    if (!cpu.load_avg.empty()) {
-        ostringstream ss;
-        ss << "Load: ";
-        for (size_t i=0; i<min((size_t)3,cpu.load_avg.size()); i++) {
-            if (i) ss<<" ";
-            ss<<fixed<<setprecision(2)<<cpu.load_avg[i];
-        }
-        load_label->SetLabel(wxString::FromUTF8(ss.str()));
-    }
-
-    double up = Tools::system_uptime();
-    uptime_label->SetLabel(wxString::FromUTF8("Up: "+sec_fmt(up)));
-
-    if (Cpu::has_battery) {
-        auto [pct, watts, secs, status] = Cpu::current_bat;
-        ostringstream bs;
-        bs << "BAT: " << pct << "%";
-        if (secs>0) bs << " (" << sec_fmt(secs) << ")";
-        if (watts>=0) bs << " " << fixed << setprecision(1) << watts << "W";
-        battery_label->SetLabel(wxString::FromUTF8(bs.str()));
-    }
-
-    if (Cpu::got_sensors && !cpu.temp.empty() && !cpu.temp[0].empty()) {
-        long long t = cpu.temp[0].back();
-        ostringstream ts;
-        ts << "Temp: " << t << "\u00B0C";
-        temp_label->SetLabel(wxString::FromUTF8(ts.str()));
-    }
-
-    GetSizer()->Layout();
+    y += 6;
 }
 
-// ─── Memory Panel ──────────────────────────────────────────────
-
-MemPanel::MemPanel(wxWindow* p) : wxPanel(p) {
-    wxBoxSizer* ms = new wxBoxSizer(wxVERTICAL);
-
-    total_label = new wxStaticText(this, wxID_ANY, "Total: --");
-    total_label->SetFont(wxFont(11, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    total_label->SetForegroundColour(wxColour(200,200,200));
-    ms->Add(total_label, 0, wxALL, 4);
-
-    wxStaticText* rt = new wxStaticText(this, wxID_ANY, "RAM");
-    rt->SetForegroundColour(wxColour(140,200,140));
-    rt->SetFont(wxFont(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    ms->Add(rt, 0, wxALL, 4);
-
-    ram_gauge = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxSize(-1, 24));
-    ms->Add(ram_gauge, 0, wxEXPAND|wxALL, 4);
-
-    ram_label = new wxStaticText(this, wxID_ANY, "Used: -- / Avail: -- / Cache: -- / Free: --");
-    ram_label->SetForegroundColour(wxColour(180,180,180));
-    ms->Add(ram_label, 0, wxALL, 4);
-
-    wxStaticText* st = new wxStaticText(this, wxID_ANY, "Swap");
-    st->SetForegroundColour(wxColour(200,160,60));
-    st->SetFont(wxFont(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    ms->Add(st, 0, wxALL, 4);
-
-    swap_gauge = new wxGauge(this, wxID_ANY, 100, wxDefaultPosition, wxSize(-1, 24));
-    ms->Add(swap_gauge, 0, wxEXPAND|wxALL, 4);
-
-    swap_label = new wxStaticText(this, wxID_ANY, "Used: -- / Free: --");
-    swap_label->SetForegroundColour(wxColour(180,180,180));
-    ms->Add(swap_label, 0, wxALL, 4);
-
-    wxStaticText* dt = new wxStaticText(this, wxID_ANY, "Disks");
-    dt->SetForegroundColour(wxColour(140,180,220));
-    dt->SetFont(wxFont(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    ms->Add(dt, 0, wxALL, 4);
-
-    disk_list = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 180),
-                               wxLC_REPORT|wxLC_SINGLE_SEL);
-    disk_list->AppendColumn("Mount", wxLIST_FORMAT_LEFT, 100);
-    disk_list->AppendColumn("Name", wxLIST_FORMAT_LEFT, 80);
-    disk_list->AppendColumn("Total", wxLIST_FORMAT_RIGHT, 80);
-    disk_list->AppendColumn("Used", wxLIST_FORMAT_RIGHT, 80);
-    disk_list->AppendColumn("Free", wxLIST_FORMAT_RIGHT, 80);
-    disk_list->AppendColumn("Use%", wxLIST_FORMAT_RIGHT, 60);
-    disk_list->AppendColumn("IO Read", wxLIST_FORMAT_RIGHT, 90);
-    disk_list->AppendColumn("IO Write", wxLIST_FORMAT_RIGHT, 90);
-    ms->Add(disk_list, 1, wxEXPAND|wxALL, 4);
-
-    SetSizerAndFit(ms);
-
-    timer = new wxTimer(this);
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&){ RefreshData(); }, timer->GetId());
-    timer->Start(2000);
-}
-
-void MemPanel::RefreshData() {
-    Mem::collect(false);
-    UpdateStats();
-}
-
-void MemPanel::UpdateStats() {
+// ─── Memory/Disks section ────────────────────────────────
+void Dashboard::DrawMem(wxDC& dc, int& y, int x, int w) {
+    int bw = w, gap = 3;
+    int lines = 10; // total, ram bar, ram details, swap bar, swap details, disk header + 4-5 disks
     auto& mem = Mem::current_mem;
-    uint64_t total = Mem::get_totalMem();
-    total_label->SetLabel(wxString::FromUTF8("Total: "+human_bytes(total)));
+    int disks = min(6, (int)mem.disks_order.size());
+    int box_h = 22 + 40 + gap + 20 + 40 + gap + 20 + gap + 16 + disks*16;
 
-    uint64_t used = mem.stats["used"], available = mem.stats["available"];
-    uint64_t cached = mem.stats["cached"], free = mem.stats["free"];
-    int ram_pct = total>0 ? (int)(used*100/total) : 0;
-    ram_gauge->SetValue(ram_pct);
-    if (ram_pct>90) ram_gauge->SetForegroundColour(wxColour(220,50,50));
-    else if (ram_pct>70) ram_gauge->SetForegroundColour(wxColour(240,150,30));
-    else ram_gauge->SetForegroundColour(wxColour(60,180,75));
+    DrawBox(dc, x, y, bw, box_h, "", BORDER);
 
-    ostringstream rs;
-    rs << "Used: "<<human_bytes(used)<<" / Avail: "<<human_bytes(available)
-       << " / Cache: "<<human_bytes(cached)<<" / Free: "<<human_bytes(free)
-       << "  ("<<ram_pct<<"%)";
-    ram_label->SetLabel(wxString::FromUTF8(rs.str()));
+    // Title
+    dc.SetFont(wxFont(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
+    dc.SetTextForeground(TITLE_FG);
+    dc.DrawText("Memory & Disks", x+4, y+2);
+    y += 22;
 
-    if (Mem::has_swap) {
-        uint64_t su = mem.stats["swap_used"], sf = mem.stats["swap_free"];
-        uint64_t st = mem.stats["swap_total"];
-        int sp = st>0 ? (int)(su*100/st) : 0;
-        swap_gauge->SetValue(sp);
-        ostringstream ss;
-        ss << "Used: "<<human_bytes(su)<<" / Free: "<<human_bytes(sf)<<" / Total: "<<human_bytes(st);
-        swap_label->SetLabel(wxString::FromUTF8(ss.str()));
+    // RAM
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+    dc.SetTextForeground(MAIN_FG);
+    double ram_pct = state.mem_total>0 ? (double)state.mem_used/state.mem_total : 0;
+    dc.DrawText(wxString::Format("RAM  %s / %s", human_bytes(state.mem_used), human_bytes(state.mem_total)), x+6, y);
+    dc.DrawText(wxString::Format("%.0f%%", ram_pct*100), x+bw-40, y);
+    y += 14;
+    DrawGauge(dc, x+6, y, bw-12, 18, ram_pct, GAUGE_RAM);
+    y += 22;
+
+    dc.SetTextForeground(wxColour(140,140,140));
+    dc.DrawText(wxString::Format("avail: %s  cache: %s  free: %s",
+        human_bytes(state.mem_avail), human_bytes(state.mem_cache), human_bytes(state.mem_free)), x+6, y);
+    y += 18;
+
+    // Swap
+    if (state.swap_total > 0) {
+        double sw_pct = (double)state.swap_used/state.swap_total;
+        dc.SetTextForeground(MAIN_FG);
+        dc.DrawText(wxString::Format("Swap %s / %s", human_bytes(state.swap_used), human_bytes(state.swap_total)), x+6, y);
+        dc.DrawText(wxString::Format("%.0f%%", sw_pct*100), x+bw-40, y);
+        y += 14;
+        DrawGauge(dc, x+6, y, bw-12, 14, sw_pct, GAUGE_SWAP);
+        y += 18;
     }
 
-    disk_list->DeleteAllItems();
-    int idx=0;
+    // Disks
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
+    dc.SetTextForeground(wxColour(140,180,220));
+    dc.DrawText("Disks", x+6, y);
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+    y += 16;
+
+    int dcount = 0;
     for (auto& mnt : mem.disks_order) {
-        if (!mem.disks.contains(mnt)) continue;
+        if (!mem.disks.contains(mnt) || dcount>=8) continue;
         auto& d = mem.disks.at(mnt);
-        disk_list->InsertItem(idx, wxString::FromUTF8(mnt));
-        disk_list->SetItem(idx, 1, wxString::FromUTF8(d.name));
-        disk_list->SetItem(idx, 2, wxString::FromUTF8(human_bytes(d.total)));
-        disk_list->SetItem(idx, 3, wxString::FromUTF8(human_bytes(d.used)));
-        disk_list->SetItem(idx, 4, wxString::FromUTF8(human_bytes(d.free)));
-        disk_list->SetItem(idx, 5, wxString::Format("%d%%", d.used_percent));
-        disk_list->SetItem(idx, 6, d.io_read.empty() ? "---" : speed_str(d.io_read.back()));
-        disk_list->SetItem(idx, 7, d.io_write.empty() ? "---" : speed_str(d.io_write.back()));
-        idx++;
-    }
+        dc.SetTextForeground(MAIN_FG);
+        dc.DrawText(wxString::FromUTF8(mnt), x+6, y);
 
-    GetSizer()->Layout();
+        double dp = d.total>0 ? (double)d.used/d.total : 0;
+        DrawGauge(dc, x+80, y+2, bw-160, 10, dp,
+            dp>0.9?wxColour(220,50,50):dp>0.75?wxColour(240,150,30):wxColour(60,180,75));
+
+        ostringstream di;
+        di << human_bytes(d.used) << "/" << human_bytes(d.total) << " (" << d.used_percent << "%)";
+        dc.SetTextForeground(wxColour(150,150,150));
+        dc.DrawText(wxString::FromUTF8(di.str()), x+bw-78, y);
+        y += 14;
+        dcount++;
+    }
+    y += 6;
 }
 
-// ─── Network Panel ─────────────────────────────────────────────
+// ─── Network section ──────────────────────────────────────
+void Dashboard::DrawNet(wxDC& dc, int& y, int x, int w) {
+    int bw = w, gh = 60, gap = 4;
+    int box_h = 22 + 14 + gh + 16 + 16 + gap + 16 + gh + 16 + 16 + 12;
 
-NetPanel::NetPanel(wxWindow* p) : wxPanel(p) {
-    wxBoxSizer* ms = new wxBoxSizer(wxVERTICAL);
+    DrawBox(dc, x, y, bw, box_h, "", BORDER);
 
-    wxBoxSizer* ir2 = new wxBoxSizer(wxHORIZONTAL);
-    ir2->Add(new wxStaticText(this, wxID_ANY, "Interface:"), 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    iface_choice = new wxComboBox(this, wxID_ANY, "", wxDefaultPosition, wxSize(150,-1));
-    iface_choice->Bind(wxEVT_COMBOBOX, [this](wxCommandEvent&){
-        Net::selected_iface = iface_choice->GetValue().ToStdString();
-    });
-    ir2->Add(iface_choice, 0, wxALL, 4);
-    ip_label = new wxStaticText(this, wxID_ANY, "");
-    ip_label->SetForegroundColour(wxColour(140,180,220));
-    ir2->Add(ip_label, 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    iface_label = new wxStaticText(this, wxID_ANY, "");
-    ir2->Add(iface_label, 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    ms->Add(ir2, 0, wxEXPAND);
+    // Title
+    dc.SetFont(wxFont(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
+    dc.SetTextForeground(TITLE_FG);
+    wxString ntitle = wxString::Format("Network  %s  %s  %s",
+        wxString::FromUTF8(state.net_iface),
+        state.net_connected ? "\u25CF" : "\u25CB",
+        wxString::FromUTF8(state.net_ip));
+    dc.DrawText(ntitle, x+4, y+2);
+    y += 22;
+
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
 
     // Download
-    wxStaticText* dlt = new wxStaticText(this, wxID_ANY, "\u25BC Download");
-    dlt->SetForegroundColour(wxColour(120,200,120));
-    dlt->SetFont(wxFont(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    ms->Add(dlt, 0, wxALL, 4);
+    dc.SetTextForeground(wxColour(120,200,120));
+    dc.DrawText("\u25BC Download", x+6, y);
+    y += 14;
 
-    dl_graph = new GraphPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 100));
-    dl_graph->SetTitle("Download");
-    dl_graph->SetColor(wxColour(60,200,80));
-    ms->Add(dl_graph, 0, wxEXPAND|wxALL, 4);
+    int gx = x+6, gw2 = bw-12;
+    dc.SetPen(wxPen(wxColour(50,50,50)));
+    dc.SetBrush(wxBrush(wxColour(25,25,25)));
+    dc.DrawRectangle(gx, y, gw2, gh);
+    DrawLineGraph(dc, gx, y, gw2, gh, state.net_dl, 0, GRAPH_DL, true);
+    y += gh;
 
-    dl_speed_label = new wxStaticText(this, wxID_ANY, "Speed: --");
-    dl_speed_label->SetForegroundColour(wxColour(200,200,200));
-    ms->Add(dl_speed_label, 0, wxALL, 4);
-
-    dl_total_label = new wxStaticText(this, wxID_ANY, "Total: --");
-    dl_total_label->SetForegroundColour(wxColour(160,160,160));
-    ms->Add(dl_total_label, 0, wxALL, 4);
-
-    dl_avg_label = new wxStaticText(this, wxID_ANY, "5m Avg: --");
-    dl_avg_label->SetForegroundColour(wxColour(140,140,200));
-    ms->Add(dl_avg_label, 0, wxALL, 4);
+    dc.SetTextForeground(MAIN_FG);
+    dc.DrawText(wxString::Format("Speed: %s    Total: %s    5m avg: %s",
+        speed_str(state.net_dl_speed), human_bytes(state.net_dl_total), speed_str(state.net_dl_avg)), x+6, y);
+    y += 18;
 
     // Upload
-    wxStaticText* ult = new wxStaticText(this, wxID_ANY, "\u25B2 Upload");
-    ult->SetForegroundColour(wxColour(200,140,60));
-    ult->SetFont(wxFont(10, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
-    ms->Add(ult, 0, wxALL, 4);
+    dc.SetTextForeground(wxColour(200,140,60));
+    dc.DrawText("\u25B2 Upload", x+6, y);
+    y += 14;
 
-    ul_graph = new GraphPanel(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 100));
-    ul_graph->SetTitle("Upload");
-    ul_graph->SetColor(wxColour(220,140,40));
-    ms->Add(ul_graph, 0, wxEXPAND|wxALL, 4);
+    dc.SetPen(wxPen(wxColour(50,50,50)));
+    dc.SetBrush(wxBrush(wxColour(25,25,25)));
+    dc.DrawRectangle(gx, y, gw2, gh);
+    DrawLineGraph(dc, gx, y, gw2, gh, state.net_ul, 0, GRAPH_UL, true);
+    y += gh;
 
-    ul_speed_label = new wxStaticText(this, wxID_ANY, "Speed: --");
-    ul_speed_label->SetForegroundColour(wxColour(200,200,200));
-    ms->Add(ul_speed_label, 0, wxALL, 4);
-
-    ul_total_label = new wxStaticText(this, wxID_ANY, "Total: --");
-    ul_total_label->SetForegroundColour(wxColour(160,160,160));
-    ms->Add(ul_total_label, 0, wxALL, 4);
-
-    ul_avg_label = new wxStaticText(this, wxID_ANY, "5m Avg: --");
-    ul_avg_label->SetForegroundColour(wxColour(140,140,200));
-    ms->Add(ul_avg_label, 0, wxALL, 4);
-
-    SetSizerAndFit(ms);
-
-    timer = new wxTimer(this);
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&){ RefreshData(); }, timer->GetId());
-    timer->Start(1500);
+    dc.SetTextForeground(MAIN_FG);
+    dc.DrawText(wxString::Format("Speed: %s    Total: %s    5m avg: %s",
+        speed_str(state.net_ul_speed), human_bytes(state.net_ul_total), speed_str(state.net_ul_avg)), x+6, y);
+    y += 18;
 }
 
-void NetPanel::RefreshData() {
-    Net::collect(false);
-    UpdateStats();
-}
+// ─── Process section ──────────────────────────────────────
+void Dashboard::DrawProc(wxDC& dc, int& y, int x, int w) {
+    int bw = w, row_h = 14;
+    int max_rows = 20;
+    int procs = min(max_rows, (int)state.procs.size());
+    int box_h = 22 + 14 + procs * row_h + 8;
 
-void NetPanel::UpdateStats() {
-    iface_choice->Clear();
-    for (auto& iface : Net::interfaces)
-        iface_choice->Append(wxString::FromUTF8(iface));
-    if (!Net::selected_iface.empty())
-        iface_choice->SetStringSelection(wxString::FromUTF8(Net::selected_iface));
-    if (!Net::current_net.contains(Net::selected_iface)) return;
+    DrawBox(dc, x, y, bw, box_h, "", BORDER);
 
-    auto& net = Net::current_net.at(Net::selected_iface);
-    string ip = net.ipv4.empty() ? net.ipv6 : net.ipv4;
-    ip_label->SetLabel(wxString::FromUTF8(ip));
-    iface_label->SetLabel(net.connected ? "\u25CF Connected" : "\u25CB Disconnected");
-    iface_label->SetForegroundColour(net.connected ? wxColour(120,220,120) : wxColour(180,100,100));
+    // Title + count
+    dc.SetFont(wxFont(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
+    dc.SetTextForeground(TITLE_FG);
+    dc.DrawText(wxString::Format("Processes (%zu)", state.procs.size()), x+4, y+2);
+    y += 22;
 
-    if (net.bandwidth.contains("download"s)) {
-        dl_graph->SetData(net.bandwidth.at("download"s));
-        auto& s = net.stat.at("download"s);
-        dl_speed_label->SetLabel(wxString::FromUTF8("Speed: "+speed_str(s.speed)));
-        dl_total_label->SetLabel(wxString::FromUTF8("Total: "+human_bytes(s.total)));
-        if (s.avg_speed>0) dl_avg_label->SetLabel(wxString::FromUTF8("5m Avg: "+speed_str(s.avg_speed)));
+    // Column headers
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
+    dc.SetTextForeground(wxColour(140,140,140));
+    int col_pid = x+6;
+    int col_name = x+70;
+    int col_cpu = x+bw-160;
+    int col_mem = x+bw-100;
+    int col_user = x+bw-260;
+    dc.DrawText("PID", col_pid, y);
+    dc.DrawText("Name", col_name, y);
+    dc.DrawText("CPU%", col_cpu, y);
+    dc.DrawText("MEM", col_mem, y);
+    dc.DrawText("User", col_user-20, y);
+    y += 16;
+
+    dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+
+    for (int i=0; i<procs; i++) {
+        auto& p = state.procs[i];
+        dc.SetTextForeground(p.cpu_p>50?wxColour(255,140,100):p.cpu_p>20?wxColour(255,220,140):MAIN_FG);
+
+        dc.DrawText(wxString::Format("%zu", p.pid), col_pid, y);
+
+        string name = p.name;
+        if ((int)name.size() > 30) name = name.substr(0, 27) + "...";
+        dc.DrawText(wxString::FromUTF8(name), col_name, y);
+
+        dc.DrawText(wxString::Format("%.1f", p.cpu_p), col_cpu, y);
+        dc.DrawText(wxString::FromUTF8(human_bytes(p.mem)), col_mem, y);
+
+        string user = p.user;
+        if (user.size() > 12) user = user.substr(0,11);
+        dc.DrawText(wxString::FromUTF8(user), col_user-20, y);
+
+        y += row_h;
     }
-    if (net.bandwidth.contains("upload"s)) {
-        ul_graph->SetData(net.bandwidth.at("upload"s));
-        auto& s = net.stat.at("upload"s);
-        ul_speed_label->SetLabel(wxString::FromUTF8("Speed: "+speed_str(s.speed)));
-        ul_total_label->SetLabel(wxString::FromUTF8("Total: "+human_bytes(s.total)));
-        if (s.avg_speed>0) ul_avg_label->SetLabel(wxString::FromUTF8("5m Avg: "+speed_str(s.avg_speed)));
+    y += 6;
+}
+
+// ─── Gauge drawing ────────────────────────────────────────
+void Dashboard::DrawGauge(wxDC& dc, int x, int y, int w, int h, double pct, const wxColour& c) {
+    pct = max(0.0, min(1.0, pct));
+    // Background
+    dc.SetPen(*wxTRANSPARENT_PEN);
+    dc.SetBrush(wxBrush(wxColour(50,50,50)));
+    dc.DrawRectangle(x, y, w, h);
+    // Filled
+    int fw = (int)(w * pct);
+    if (fw > 0) {
+        dc.SetBrush(wxBrush(c));
+        dc.DrawRectangle(x, y, fw, h);
     }
-
-    GetSizer()->Layout();
+    // Border
+    dc.SetPen(wxPen(wxColour(80,80,80)));
+    dc.SetBrush(*wxTRANSPARENT_BRUSH);
+    dc.DrawRectangle(x, y, w, h);
 }
 
-// ─── Process Panel ─────────────────────────────────────────────
-
-wxBEGIN_EVENT_TABLE(ProcPanel, wxPanel)
-    EVT_LIST_COL_CLICK(wxID_ANY, ProcPanel::OnColClick)
-wxEND_EVENT_TABLE()
-
-ProcPanel::ProcPanel(wxWindow* p) : wxPanel(p) {
-    wxBoxSizer* ms = new wxBoxSizer(wxVERTICAL);
-
-    wxBoxSizer* tr = new wxBoxSizer(wxHORIZONTAL);
-    count_label = new wxStaticText(this, wxID_ANY, "Processes: --");
-    count_label->SetForegroundColour(wxColour(180,180,180));
-    tr->Add(count_label, 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    tr->AddStretchSpacer();
-    tr->Add(new wxStaticText(this, wxID_ANY, "Filter:"), 0, wxALL|wxALIGN_CENTER_VERTICAL, 4);
-    filter_text = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxSize(160,-1));
-    filter_text->Bind(wxEVT_TEXT, [this](wxCommandEvent&){ UpdateList(); });
-    tr->Add(filter_text, 0, wxALL, 4);
-    ms->Add(tr, 0, wxEXPAND);
-
-    proc_list = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxSize(-1, 300),
-                               wxLC_REPORT|wxLC_SINGLE_SEL);
-    proc_list->AppendColumn("PID", wxLIST_FORMAT_RIGHT, 60);
-    proc_list->AppendColumn("Name", wxLIST_FORMAT_LEFT, 160);
-    proc_list->AppendColumn("CPU%", wxLIST_FORMAT_RIGHT, 60);
-    proc_list->AppendColumn("MEM", wxLIST_FORMAT_RIGHT, 80);
-    proc_list->AppendColumn("User", wxLIST_FORMAT_LEFT, 100);
-    proc_list->AppendColumn("Threads", wxLIST_FORMAT_RIGHT, 60);
-    proc_list->AppendColumn("State", wxLIST_FORMAT_LEFT, 80);
-    ms->Add(proc_list, 1, wxEXPAND|wxALL, 4);
-
-    SetSizerAndFit(ms);
-
-    timer = new wxTimer(this);
-    Bind(wxEVT_TIMER, [this](wxTimerEvent&){ RefreshData(); }, timer->GetId());
-    timer->Start(2000);
-}
-
-void ProcPanel::RefreshData() {
-    Proc::collect(false);
-    UpdateList();
-}
-
-void ProcPanel::UpdateList() {
-    auto& procs = Proc::current_procs;
-    string filter = filter_text->GetValue().Lower().ToStdString();
-
-    vector<Proc::proc_info*> filt;
-    for (auto& p : procs) {
-        if (!filter.empty()) {
-            string nl = p.name;
-            transform(nl.begin(), nl.end(), nl.begin(), ::tolower);
-            if (nl.find(filter) == string::npos) continue;
-        }
-        filt.push_back(&p);
+// ─── Line graph ───────────────────────────────────────────
+void Dashboard::DrawLineGraph(wxDC& dc, int x, int y, int w, int h,
+                               const deque<long long>& d, long long maxv,
+                               const wxColour& c, bool autoscale) {
+    if (d.size()<2) return;
+    long long mx = maxv;
+    if (autoscale) {
+        mx = max(1ll, *max_element(d.begin(), d.end()));
+        mx = max(mx, maxv);
     }
-
-    sort(filt.begin(), filt.end(), [this](auto* a, auto* b){
-        auto c = [&](auto va, auto vb){ return sort_asc ? va<vb : va>vb; };
-        switch(sort_col) {
-            case 0: return c(a->pid, b->pid);
-            case 1: return c(a->name, b->name);
-            case 2: return c(a->cpu_p, b->cpu_p);
-            case 3: return c(a->mem, b->mem);
-            case 4: return c(a->user, b->user);
-            case 5: return c(a->threads, b->threads);
-            default: return c(a->cpu_p, b->cpu_p);
-        }
-    });
-
-    count_label->SetLabel(wxString::Format("Processes: %zu", filt.size()));
-    proc_list->DeleteAllItems();
-    for (size_t i=0; i<filt.size(); i++) {
-        auto& p = *filt[i];
-        long idx = proc_list->InsertItem(i, wxString::Format("%zu", p.pid));
-        proc_list->SetItem(idx, 1, wxString::FromUTF8(p.name));
-        proc_list->SetItem(idx, 2, wxString::Format("%.1f", p.cpu_p));
-        proc_list->SetItem(idx, 3, wxString::FromUTF8(human_bytes(p.mem)));
-        proc_list->SetItem(idx, 4, wxString::FromUTF8(p.user));
-        proc_list->SetItem(idx, 5, wxString::Format("%zu", p.threads));
-        proc_list->SetItem(idx, 6, wxString::FromUTF8(string(1, p.state)));
-        if (p.cpu_p > 50) proc_list->SetItemTextColour(idx, wxColour(255,150,100));
-        else if (p.cpu_p > 20) proc_list->SetItemTextColour(idx, wxColour(255,220,140));
+    int n = d.size();
+    dc.SetPen(wxPen(c, 1));
+    int lx=-1, ly=-1;
+    for (int i=0; i<n; i++) {
+        int px = x + (int)((double)i*w/max(1,n-1));
+        int py = y+h-1 - (int)((double)d[i]*h/max(1ll,mx));
+        py = max(y, min(y+h-1, py));
+        if (lx>=0) dc.DrawLine(lx, ly, px, py);
+        lx=px; ly=py;
     }
 }
 
-void ProcPanel::OnColClick(wxListEvent& evt) {
-    int col = evt.GetColumn();
-    if (col == sort_col) sort_asc = !sort_asc;
-    else { sort_col = col; sort_asc = false; }
-    UpdateList();
-}
-
-// ─── MainFrame ─────────────────────────────────────────────────
-
+// ─── MainFrame ────────────────────────────────────────────
 wxBEGIN_EVENT_TABLE(MainFrame, wxFrame)
     EVT_CLOSE(MainFrame::OnClose)
+    EVT_KEY_DOWN(MainFrame::OnKeyDown)
 wxEND_EVENT_TABLE()
 
-MainFrame::MainFrame() : wxFrame(nullptr, wxID_ANY, "btop++ GUI", wxDefaultPosition, wxSize(960, 680)) {
-    SetBackgroundColour(wxColour(40,40,40));
-    notebook = new wxAuiNotebook(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                 wxAUI_NB_TOP|wxAUI_NB_TAB_SPLIT|wxAUI_NB_TAB_MOVE);
-
-    cpu_panel = new CpuPanel(notebook);
-    notebook->AddPage(cpu_panel, "CPU", true);
-    mem_panel = new MemPanel(notebook);
-    notebook->AddPage(mem_panel, "Memory");
-    net_panel = new NetPanel(notebook);
-    notebook->AddPage(net_panel, "Network");
-    proc_panel = new ProcPanel(notebook);
-    notebook->AddPage(proc_panel, "Processes");
-
-    CreateStatusBar();
-    SetStatusText("Ready");
+MainFrame::MainFrame() : wxFrame(nullptr, wxID_ANY, "btop++ GUI",
+                                  wxDefaultPosition, wxSize(960, 800)) {
+    SetBackgroundColour(BG);
+    dash = new Dashboard(this);
     Maximize();
+}
 
-    // Force initial data refresh after UI is visible
-    CallAfter([this](){
-        if (cpu_panel) cpu_panel->RefreshData();
-        if (mem_panel) mem_panel->RefreshData();
-        if (net_panel) net_panel->RefreshData();
-        if (proc_panel) proc_panel->RefreshData();
-    });
+void MainFrame::TakeScreenshot(const wxString& path) {
+    wxSize sz = GetClientSize();
+    wxBitmap bmp(sz.x, sz.y);
+    wxMemoryDC mdc(bmp);
+    mdc.SetBackground(wxBrush(BG));
+    mdc.Clear();
+    dash->DoPaint(mdc);
+    mdc.SelectObject(wxNullBitmap);
+    bmp.SaveFile(path, wxBITMAP_TYPE_PNG);
 }
 
 void MainFrame::OnClose(wxCloseEvent&) { Destroy(); }
 
-// ─── App ───────────────────────────────────────────────────────
+void MainFrame::OnKeyDown(wxKeyEvent& evt) {
+    if (evt.GetKeyCode() == 'S' && evt.ControlDown()) {
+        TakeScreenshot("/tmp/btop-gui-screenshot.png");
+    }
+    evt.Skip();
+}
+
+// ─── App ──────────────────────────────────────────────────
 
 bool BtopApp::OnInit() {
-    try {
-        Shared::init();
-    } catch (const exception& e) {
-        wxMessageBox("Backend init failed: " + string(e.what()), "Error", wxOK|wxICON_ERROR);
+    // Check for screenshot mode
+    bool shot = false;
+    for (int i=1; i<argc; i++)
+        if (string(argv[i]) == "--screenshot") shot = true;
+
+    try { Shared::init(); }
+    catch (const exception& e) {
+        wxMessageBox("Backend init failed: "+string(e.what()), "Error");
         return false;
     }
 
-    // Initial data collection
     Cpu::collect(false);
     Mem::collect(false);
     Net::collect(false);
@@ -632,9 +602,19 @@ bool BtopApp::OnInit() {
 
     MainFrame* f = new MainFrame();
     f->Show(true);
+
+    if (shot) {
+        // Wait for first data refresh, then screenshot
+        wxTimer* st = new wxTimer(f);
+        st->Bind(wxEVT_TIMER, [f, st](wxTimerEvent&){
+            f->TakeScreenshot("/tmp/btop-gui-screenshot.png");
+            f->Close();
+        });
+        st->Start(3000);
+    }
+
     return true;
 }
 
 int BtopApp::OnExit() { return 0; }
-
 wxIMPLEMENT_APP(BtopApp);
