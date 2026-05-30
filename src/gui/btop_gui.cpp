@@ -144,7 +144,13 @@ void Dashboard::DrawCPU(wxDC&dc,int x,int y,int ow,int oh){
     // Inner stats box on right
     fprintf(stderr,"DrawCPU: inner box bw=%d bx=%d by=%d bh=%d\n",bw,bx,by,bh);fflush(stderr);
     // Draw stats directly without inner box border to avoid edge crash
-    dc.SetPen(*wxTRANSPARENT_PEN);dc.SetBrush(wxBrush(BOX_FILL));dc.DrawRectangle(bx,by,bw,bh);
+    fprintf(stderr,"DrawCPU: fill rect...\n");fflush(stderr);
+    dc.SetPen(*wxTRANSPARENT_PEN);
+    fprintf(stderr,"DrawCPU: setbrush...\n");fflush(stderr);
+    dc.SetBrush(wxBrush(BOX_FILL));
+    fprintf(stderr,"DrawCPU: drawrect...\n");fflush(stderr);
+    dc.DrawRectangle(bx,by,bw,bh);
+    fprintf(stderr,"DrawCPU: rect done\n");fflush(stderr);
     int iy=by+12,ix=bx+2;
     // CPU meter
     long long pct=state.cpu_total.empty()?0:state.cpu_total.back();
