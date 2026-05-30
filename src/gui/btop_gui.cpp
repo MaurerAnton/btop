@@ -62,7 +62,19 @@ void Dashboard::RefreshState(){
     state.procs=Proc::current_procs;}
 
 // ─── Drawing primitives ────────────────────────────────────
-void Dashboard::OnPaint(wxPaintEvent&){wxAutoBufferedPaintDC dc(this);DoPaint(dc);}
+void Dashboard::OnPaint(wxPaintEvent&){
+    wxSize sz=GetClientSize();
+    if(sz.x<100||sz.y<10)return;
+    // Create our own bitmap-backed DC to avoid scrolled window edge issues
+    wxBitmap bmp(sz.x,sz.y);
+    wxMemoryDC mdc(bmp);
+    mdc.SetBackground(wxBrush(BG));mdc.Clear();
+    DoPaint(mdc);
+    mdc.SelectObject(wxNullBitmap);
+    // Blit to paint DC
+    wxPaintDC pdc(this);
+    pdc.DrawBitmap(bmp,0,0);
+}
 
 void Dashboard::DrawBox(wxDC&dc,int x,int y,int w,int h,const wxColour&fill,const wxColour&border){
     if(w<=0||h<=0)return;
@@ -99,7 +111,6 @@ void Dashboard::DoPaint(wxDC&dc){
     fprintf(stderr,"DoPaint start\n");fflush(stderr);
     wxSize sz=GetClientSize();int W=max(680,sz.x);(void)sz.y;
     if(W<100)return;
-    dc.SetBackground(wxBrush(BG));dc.Clear();
     int gap=2,x=2,y=2;
 
     int cpu_w=W-4,cpu_h=show_cpu?CpuH(cpu_w):0;
