@@ -122,10 +122,11 @@ int main(){
     {bx(cr,x,y,mem_w,mem_h,BOX_BG);bd(cr,x,y,mem_w,mem_h);
         txc(cr,x,y,mem_w,"Memory & Disks",TITLE,9,1);y+=20;
         uint64_t tot=Mem::get_totalMem(),used=mem.stats["used"],avail=mem.stats["available"],cache=mem.stats["cached"],free=mem.stats["free"];
+        uint64_t anon=mem.stats.contains("anon")?mem.stats.at("anon"):0;
         double rp=tot>0?(double)used/tot:0;
         tx(cr,x+pad,y,"RAM  "+hb(used)+" / "+hb(tot),MAIN,8);tx(cr,x+mem_w-44,y,to_string((int)(rp*100))+"%",MAIN,8);y+=14;
         bar(cr,x+pad,y,mem_w-2*pad,18,rp,RAM_C);y+=20;
-        tx(cr,x+pad,y,"avail:"+hb(avail)+"  cache:"+hb(cache)+"  free:"+hb(free),GREY,8);y+=16;
+        tx(cr,x+pad,y,"avail:"+hb(avail)+"  cache:"+hb(cache)+"  free:"+hb(free)+(anon>0?"  anon:"+hb(anon):""),GREY,8);y+=16;
         uint64_t su=mem.stats["swap_used"],stot=mem.stats["swap_total"],sfree=mem.stats["swap_free"];
         if(stot>0){double sp=(double)su/stot;
             tx(cr,x+pad,y,"Swap "+hb(su)+" / "+hb(stot),MAIN,8);tx(cr,x+mem_w-44,y,to_string((int)(sp*100))+"%",MAIN,8);y+=14;

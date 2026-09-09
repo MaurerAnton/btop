@@ -1231,7 +1231,7 @@ namespace Mem {
 
 			//? Mem graphs and meters
 			for (const auto& name : mem_names) {
-
+				if (name == "anon" and not has_anon) continue;
 				if (use_graphs)
 					mem_graphs[name] = Draw::Graph{mem_meter, graph_height, name, safeVal(mem.percent, name), graph_symbol};
 				else
@@ -1320,6 +1320,8 @@ namespace Mem {
 
 		out += Mv::to(y + 1, x + 2) + Theme::c("title") + Fx::b + "Total:" + rjust(floating_humanizer(totalMem), mem_width - 9) + Fx::ub + Theme::c("main_fg");
 		vector<string> comb_names (mem_names.begin(), mem_names.end());
+		if (not has_anon)
+			comb_names.erase(std::remove(comb_names.begin(), comb_names.end(), "anon"s), comb_names.end());
 		if (show_swap and has_swap and not swap_disk) comb_names.insert(comb_names.end(), swap_names.begin(), swap_names.end());
 		for (const auto& name : comb_names) {
 			if (cy > height - 4) break;
@@ -2443,7 +2445,8 @@ namespace Draw {
 			else
 				mem_width = width - 1;
 
-			item_height = has_swap and not swap_disk ? 6 : 4;
+			//? 4 mem rows (5 with anon) + 2 swap rows when shown
+			item_height = (has_swap and not swap_disk ? 6 : 4) + (has_anon ? 1 : 0);
 			if (height - (has_swap and not swap_disk ? 3 : 2) > 2 * item_height)
 				mem_size = 3;
 			else if (mem_width > 25)

@@ -2342,6 +2342,7 @@ static auto convert_ascii_escapes(const std::string& input) -> std::string {
 
 namespace Mem {
 	bool has_swap{};
+	bool has_anon{true};
 	vector<string> fstab;
 	fs::file_time_type fstab_time;
 	int disk_ios{};
@@ -2401,8 +2402,10 @@ namespace Mem {
 		//? Read memory info from /proc/meminfo
 		ifstream meminfo(Shared::procPath / "meminfo");
 		if (meminfo.good()) {
-			bool got_avail = false;
-			for (string label; meminfo.peek() != 'D' and meminfo >> label;) {
+			bool got_avail = false, got_anon = false, got_swap = false;
+			const bool need_swap = show_swap or swap_disk;
+			mem.stats.at("anon") = 0;
+			for (string label; meminfo >> label;) {
 				if (label == "MemFree:") {
 					meminfo >> mem.stats.at("free");
 					mem.stats.at("free") <<= 10;
@@ -2415,7 +2418,11 @@ namespace Mem {
 				else if (label == "Cached:") {
 					meminfo >> mem.stats.at("cached");
 					mem.stats.at("cached") <<= 10;
-					if (not show_swap and not swap_disk) break;
+				}
+				else if (label == "Active(anon):") {
+					meminfo >> mem.stats.at("anon");
+					mem.stats.at("anon") <<= 10;
+					got_anon = true;
 				}
 				else if (label == "SwapTotal:") {
 					meminfo >> mem.stats.at("swap_total");
@@ -2424,9 +2431,20 @@ namespace Mem {
 				else if (label == "SwapFree:") {
 					meminfo >> mem.stats.at("swap_free");
 					mem.stats.at("swap_free") <<= 10;
-					break;
+					got_swap = true;
+				}
+				else if (label == "AnonPages:") {
+					//? Fallback only when Active(anon) was not found
+					if (not got_anon) {
+						meminfo >> mem.stats.at("anon");
+						mem.stats.at("anon") <<= 10;
+						got_anon = true;
+					}
 				}
 				meminfo.ignore(SSmax, '\n');
+				if (got_anon and (got_swap or not need_swap)) break;
+				//? Safety stop to avoid scanning the whole file on unknown layouts (Mapped: directly follows AnonPages:)
+				if (label == "Mapped:" or label == "CommitLimit:") break;
 			}
 			if (not got_avail) mem.stats.at("available") = mem.stats.at("free") + mem.stats.at("cached");
 			if (zfs_arc_cached) {

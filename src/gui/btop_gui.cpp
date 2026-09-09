@@ -52,6 +52,7 @@ void Dashboard::RefreshState(){
     if(Cpu::has_battery){auto[p,w,s,st]=Cpu::current_bat;state.battery_pct=p;}
     auto&mem=Mem::current_mem;state.mem_total=Mem::get_totalMem();state.mem_used=mem.stats["used"];
     state.mem_avail=mem.stats["available"];state.mem_cache=mem.stats["cached"];state.mem_free=mem.stats["free"];
+    state.mem_anon=mem.stats.contains("anon")?mem.stats["anon"]:0;
     state.swap_total=mem.stats["swap_total"];state.swap_used=mem.stats["swap_used"];state.swap_free=mem.stats["swap_free"];
     state.disks.clear();for(auto&m:mem.disks_order)if(mem.disks.contains(m))state.disks.push_back({m,mem.disks.at(m)});
     if(Net::current_net.contains(Net::selected_iface)){auto&n=Net::current_net.at(Net::selected_iface);
@@ -206,6 +207,7 @@ void Dashboard::DrawMem(wxDC&dc,int x,int y,int w,int h){
     Txt(dc,x+w-44,y,wxString::Format("%.0f%%",rp*100),MAIN_C,8);y+=13;
     Bar(dc,x+pad,y,w-2*pad,16,rp,RAM_C);y+=18;
     Txt(dc,x+pad,y,wxString::Format("av:%s ca:%s fr:%s",hb(state.mem_avail),hb(state.mem_cache),hb(state.mem_free)),TGREY,8);y+=14;
+    if(state.mem_anon>0){Txt(dc,x+pad,y,wxString::Format("anon:%s",hb(state.mem_anon)),TGREY,8);y+=14;}
     if(state.swap_total>0){double sp=(double)state.swap_used/state.swap_total;
         Txt(dc,x+pad,y,wxString::Format("Swap %s / %s",hb(state.swap_used),hb(state.swap_total)),MAIN_C,8);
         Txt(dc,x+w-44,y,wxString::Format("%.0f%%",sp*100),MAIN_C,8);y+=14;

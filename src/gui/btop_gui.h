@@ -23,7 +23,7 @@ private:
     void LineG(wxDC&,int x,int y,int w,int h,const std::deque<long long>&d,long long mx,const wxColour&c,bool border);
     struct{std::deque<long long>cpu_total;std::string cpu_name,cpu_freq;std::vector<std::deque<long long>>cpu_cores;
         double loadavg[3];long long cpu_temp=0;int battery_pct=-1;
-        uint64_t mem_total=0,mem_used=0,mem_avail=0,mem_cache=0,mem_free=0,swap_total=0,swap_used=0,swap_free=0;
+        uint64_t mem_total=0,mem_used=0,mem_avail=0,mem_cache=0,mem_free=0,mem_anon=0,swap_total=0,swap_used=0,swap_free=0;
         struct DiskEntry{std::string mount;Mem::disk_info info;};std::vector<DiskEntry>disks;
         std::deque<long long>net_dl,net_ul;uint64_t net_dl_speed=0,net_ul_speed=0,net_dl_total=0,net_ul_total=0,net_dl_avg=0,net_ul_avg=0;
         std::string net_iface,net_ip;bool net_connected=false;std::vector<Proc::proc_info>procs;}state;

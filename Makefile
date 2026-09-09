@@ -136,6 +136,30 @@ else
 $(error $(shell printf "\033[1;91mERROR: \033[97mUnsupported platform ($(PLATFORM))\033[0m"))
 endif
 
+#? Memory-aware build throttling: 1 build thread per 1.5GB available RAM
+#? <1.5GB available -> wait (sleep + re-check), >=1.5GB -> 1 thread, >=3GB -> 2 threads, etc., capped by CPU count
+MEM_PER_THREAD_KB ?= 1572864
+MEM_SLEEP ?= 15
+#? Portable available-memory probe (kB). Prints 0 when detection is unavailable.
+GET_MEM_KB = if [ -r /proc/meminfo ] && grep -q MemAvailable /proc/meminfo 2>/dev/null; then awk '/MemAvailable:/ {print $$2}' /proc/meminfo; elif command -v free >/dev/null 2>&1; then free -k | awk '/^Mem:/ {print $$7}'; elif [ "$$(uname -s)" = "Darwin" ]; then pagesize=$$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); free_pages=$$(vm_stat 2>/dev/null | awk '/Pages free:/ {gsub("\\.", "", $$3); f=$$3} /Pages inactive:/ {gsub("\\.", "", $$3); i=$$3} END {print f+i+0}'); if [ -n "$$free_pages" ] && [ "$$free_pages" -gt 0 ] 2>/dev/null; then expr $$free_pages \* $$pagesize / 1024 2>/dev/null || echo 0; else echo 0; fi; elif [ "$$(uname -s)" = "FreeBSD" ] || [ "$$(uname -s)" = "MidnightBSD" ]; then freecnt=$$(sysctl -n vm.stats.vm.v_free_count 2>/dev/null || echo 0); pagesize=$$(getconf PAGESIZE 2>/dev/null || sysctl -n hw.pagesize 2>/dev/null || echo 4096); expr $$freecnt \* $$pagesize / 1024 2>/dev/null || echo 0; else echo 0; fi
+NPROC_THREADS := $(THREADS)
+MEM_AVAILABLE_KB := $(strip $(shell $(GET_MEM_KB) 2>/dev/null || echo 0))
+MEM_THREADS := $(strip $(shell expr $(MEM_AVAILABLE_KB) / $(MEM_PER_THREAD_KB) 2>/dev/null || echo 0))
+ifeq ($(IGNORE_MEM_LIMIT),true)
+  #? Explicit bypass, keep CPU count
+else ifeq ($(MEM_AVAILABLE_KB),0)
+  #? Detection unavailable, keep CPU count
+else ifeq ($(MEM_AVAILABLE_KB),)
+  #? Detection unavailable, keep CPU count
+else ifeq ($(MEM_THREADS),0)
+  override THREADS := 1
+else
+  override THREADS := $(shell if [ $(MEM_THREADS) -lt $(NPROC_THREADS) ]; then echo $(MEM_THREADS); else echo $(NPROC_THREADS); fi)
+  ifeq ($(THREADS),)
+    override THREADS := 1
+  endif
+endif
+
 #? Use all CPU cores (will only be set if using Make 4.3+)
 MAKEFLAGS := --jobs=$(THREADS)
 ifeq ($(THREADS),1)
@@ -226,7 +250,29 @@ endif
 
 #? Default Make
 .ONESHELL:
-all: | info rocm_smi info-quiet directories btop.1 config.h btop
+all: | wait_for_mem info rocm_smi info-quiet directories btop.1 config.h btop
+
+#? Wait until at least 1.5GB RAM is available, then allow build to proceed
+.ONESHELL:
+wait_for_mem:
+	@avail=$$($(GET_MEM_KB) 2>/dev/null || echo 0); \
+	if [ -z "$$avail" ] || [ "$$avail" = "0" ]; then \
+		echo "Available memory detection unavailable, continuing build..."; \
+		exit 0; \
+	fi; \
+	while [ "$$avail" -lt $(MEM_PER_THREAD_KB) ]; do \
+		avail_mb=$$(expr "$$avail" / 1024 2>/dev/null || echo "$$avail"); \
+		echo "Only $${avail_mb}MB RAM available (<1.5GB), waiting $(MEM_SLEEP)s for memory... (1 thread needs 1.5GB, 2 threads need 3GB)"; \
+		sleep $(MEM_SLEEP); \
+		avail=$$($(GET_MEM_KB) 2>/dev/null || echo 0); \
+		if [ -z "$$avail" ] || [ "$$avail" = "0" ]; then \
+			echo "Available memory detection unavailable, continuing build..."; \
+			exit 0; \
+		fi; \
+	done; \
+	avail_mb=$$(expr "$$avail" / 1024 2>/dev/null || echo "$$avail"); \
+	threads="$(THREADS)"; if [ "$$threads" = "auto" ]; then threads=1; fi; \
+	echo "Available memory: $${avail_mb}MB, starting build with $${threads} thread(s)..."
 
 ifneq ($(QUIET),true)
 info:
@@ -236,7 +282,7 @@ info:
 	@printf "\033[1;95mGPU_SUPPORT  \033[1;94m:| \033[0m$(GPU_SUPPORT)\n"
 	@printf "\033[1;93mCXX          \033[1;93m?| \033[0m$(CXX) \033[1;93m(\033[97m$(CXX_VERSION)\033[93m)\n"
 	@$(SHOW_CC_INFO) || printf "\033[1;93mCC           \033[1;93m?| \033[0m$(CC) \033[1;93m(\033[97m$(CC_VERSION)\033[93m)\n"
-	@printf "\033[1;94mTHREADS      \033[1;94m:| \033[0m$(THREADS)\n"
+	@printf "\033[1;94mTHREADS      \033[1;94m:| \033[0m$(THREADS) (cpu:$(NPROC_THREADS) mem:$(MEM_THREADS) avail:$(MEM_AVAILABLE_KB)kB)\n"
 	@printf "\033[1;92mREQFLAGS     \033[1;91m!| \033[0m$(REQFLAGS)\n"
 	@printf "\033[1;91mWARNFLAGS    \033[1;94m:| \033[0m$(WARNFLAGS)\n"
 	@printf "\033[1;94mOPTFLAGS     \033[1;94m:| \033[0m$(OPTFLAGS)\n"
@@ -417,4 +463,4 @@ $(BUILDDIR)/%.c.o: $(SRCDIR)/$(PLATFORM_DIR)/intel_gpu_top/%.c | directories
 
 
 #? Non-File Targets
-.PHONY: all config.h msg help pre
+.PHONY: all config.h msg help pre wait_for_mem
